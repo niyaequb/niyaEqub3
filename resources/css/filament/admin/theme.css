@@ -1,0 +1,16 @@
+@import '../../../../vendor/filament/filament/resources/css/theme.css';
+
+@source '../../../../app/Filament/**/*';
+@source '../../../../resources/views/filament/**/*';
+@source '../../../../resources/views/livewire/**/*.blade.php';
+
+
+/* Sidebar background */
+.fi-sidebar {
+    background-color: white;
+}
+
+/* dark  */
+.dark .fi-sidebar {
+    background-color: #18181b; /* Tailwind's gray-800 */
+}

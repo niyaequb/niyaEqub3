@@ -1,0 +1,152 @@
+<?php
+
+namespace App\Filament\Resources\MemberEqubGroups\Tables;
+
+use App\Enums\EqubGroupModerationStatus;
+use App\Enums\EqubGroupStatus;
+use App\Enums\WinnerSelectionMode;
+use App\Models\EqubGroup;
+use App\Services\GroupDrawService;
+use Filament\Actions\Action;
+use Filament\Actions\ActionGroup;
+use Filament\Forms\Components\CheckboxList;
+use Filament\Forms\Components\Textarea;
+use Filament\Forms\Components\TextInput;
+use Filament\Notifications\Notification;
+use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Filters\SelectFilter;
+use Filament\Tables\Table;
+use Illuminate\Support\Facades\Auth;
+
+class MemberEqubGroupsTable
+{
+    public static function configure(Table $table): Table
+    {
+        return $table
+            ->columns([
+                TextColumn::make('id')->label('ID')->sortable(),
+                TextColumn::make('name')->label(__('filament.equb_group.name'))->searchable()->sortable(),
+                TextColumn::make('owner.full_name')->label(__('filament.member_equb_group.owner'))->searchable(),
+                TextColumn::make('invite_code')->label(__('filament.member_equb_group.invite_code'))->copyable()->badge()->color('gray'),
+                TextColumn::make('package.name')->label(__('filament.equb_group.package'))->toggleable(),
+                TextColumn::make('fixed_contribution_amount')->label(__('filament.equb_group.contribution'))->money('ETB')->sortable(),
+                TextColumn::make('current_members_count')->label(__('filament.equb_group.current_members_count'))->sortable(),
+                TextColumn::make('winner_selection_mode')
+                    ->label(__('filament.member_equb_group.winner_mode'))
+                    ->badge()
+                    ->formatStateUsing(fn (?WinnerSelectionMode $state): string => $state?->label() ?? '-'),
+                TextColumn::make('winner_split_plan')
+                    ->label(__('filament.member_equb_group.split_plan'))
+                    ->formatStateUsing(fn ($state): string => is_array($state) && $state !== [] ? implode(' + ', $state) : '—'),
+                TextColumn::make('moderation_status')
+                    ->label(__('filament.member_equb_group.moderation'))
+                    ->badge()
+                    ->color(fn (?EqubGroupModerationStatus $state): string => $state?->color() ?? 'gray'),
+                TextColumn::make('status')->label(__('filament.equb_group.status'))->badge()->sortable(),
+                TextColumn::make('created_at')->label(__('filament.user.created_at'))->dateTime()->sortable()->toggleable(isToggledHiddenByDefault: true),
+            ])
+            ->filters([
+                SelectFilter::make('moderation_status')
+                    ->label(__('filament.member_equb_group.moderation'))
+                    ->options(collect(EqubGroupModerationStatus::cases())
+                        ->mapWithKeys(fn (EqubGroupModerationStatus $s): array => [$s->value => $s->label()])
+                        ->toArray()),
+                SelectFilter::make('status')
+                    ->label(__('filament.equb_group.status'))
+                    ->options(collect(EqubGroupStatus::cases())
+                        ->mapWithKeys(fn (EqubGroupStatus $s): array => [$s->value => __("filament.equb_group.status_{$s->value}")])
+                        ->toArray()),
+            ])
+            ->recordActions([
+                ActionGroup::make([
+                    Action::make('ledger')
+                        ->label(__('filament.member_equb_group.view_ledger'))
+                        ->icon('heroicon-o-banknotes')
+                        ->url(fn (EqubGroup $record): string => route('filament.admin.resources.member-equb-groups.ledger', ['record' => $record])),
+
+                    Action::make('approve')
+                        ->label(__('filament.member_equb_group.approve'))
+                        ->icon('heroicon-o-check-circle')
+                        ->color('success')
+                        ->requiresConfirmation()
+                        ->visible(fn (EqubGroup $record): bool => $record->moderation_status !== EqubGroupModerationStatus::Approved)
+                        ->action(function (EqubGroup $record): void {
+                            $record->update([
+                                'moderation_status' => EqubGroupModerationStatus::Approved,
+                                'approved_at' => now(),
+                                'approved_by_admin_id' => Auth::id(),
+                                'rejection_reason' => null,
+                            ]);
+
+                            Notification::make()->title(__('filament.member_equb_group.approved_notice'))->success()->send();
+                        }),
+
+                    Action::make('reject')
+                        ->label(__('filament.member_equb_group.reject'))
+                        ->icon('heroicon-o-x-circle')
+                        ->color('danger')
+                        ->schema([
+                            Textarea::make('reason')
+                                ->label(__('filament.member_equb_group.reject_reason'))
+                                ->required()
+                                ->maxLength(300),
+                        ])
+                        ->visible(fn (EqubGroup $record): bool => $record->moderation_status !== EqubGroupModerationStatus::Rejected)
+                        ->action(function (EqubGroup $record, array $data): void {
+                            $record->update([
+                                'moderation_status' => EqubGroupModerationStatus::Rejected,
+                                'rejection_reason' => $data['reason'],
+                                'approved_by_admin_id' => Auth::id(),
+                            ]);
+
+                            Notification::make()->title(__('filament.member_equb_group.rejected_notice'))->warning()->send();
+                        }),
+
+                    Action::make('runDraw')
+                        ->label(__('filament.member_equb_group.run_draw'))
+                        ->icon('heroicon-o-sparkles')
+                        ->color('primary')
+                        ->visible(fn (EqubGroup $record): bool => $record->status === EqubGroupStatus::Running)
+                        ->schema(fn (EqubGroup $record): array => [
+                            TextInput::make('winners_count')
+                                ->label(__('filament.member_equb_group.winners_this_round'))
+                                ->numeric()
+                                ->minValue(1)
+                                ->default($record->winnersForNextRound())
+                                ->helperText(__('filament.member_equb_group.winners_hint')),
+                            CheckboxList::make('membership_ids')
+                                ->label(__('filament.member_equb_group.pick_winners'))
+                                ->options(fn (): array => app(GroupDrawService::class)
+                                    ->eligibleMemberships($record)
+                                    ->mapWithKeys(fn ($m): array => [$m->id => $m->member?->full_name ?? "Member #{$m->member_id}"])
+                                    ->toArray())
+                                ->columns(2)
+                                ->helperText(__('filament.member_equb_group.pick_winners_hint')),
+                        ])
+                        ->action(function (EqubGroup $record, array $data): void {
+                            $result = app(GroupDrawService::class)->runRound(
+                                $record,
+                                Auth::id(),
+                                $data['membership_ids'] ?? [],
+                                filled($data['winners_count'] ?? null) ? (int) $data['winners_count'] : null,
+                            );
+
+                            if (! $result['success']) {
+                                Notification::make()->title($result['message'])->danger()->send();
+
+                                return;
+                            }
+
+                            $names = collect($result['winners'])->pluck('name')->filter()->implode(', ');
+
+                            Notification::make()
+                                ->title(__('filament.member_equb_group.draw_done'))
+                                ->body($names)
+                                ->success()
+                                ->send();
+                        }),
+                ])->iconButton(),
+            ])
+            ->defaultSort('created_at', 'desc');
+    }
+}
