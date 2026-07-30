@@ -2,12 +2,15 @@
 
 namespace App\Filament\Resources\MemberEqubGroups;
 
+use App\Filament\Resources\MemberEqubGroups\Pages\CreateMemberEqubGroup;
+use App\Filament\Resources\MemberEqubGroups\Pages\EditMemberEqubGroup;
 use App\Filament\Resources\MemberEqubGroups\Pages\GroupLedger;
 use App\Filament\Resources\MemberEqubGroups\Pages\ListMemberEqubGroups;
 use App\Filament\Resources\MemberEqubGroups\Tables\MemberEqubGroupsTable;
 use App\Models\EqubGroup;
 use BackedEnum;
 use Filament\Resources\Resource;
+use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
@@ -62,6 +65,11 @@ class MemberEqubGroupResource extends Resource
         return 'warning';
     }
 
+    public static function form(Schema $schema): Schema
+    {
+        return MemberEqubGroupForm::configure($schema);
+    }
+
     public static function table(Table $table): Table
     {
         return MemberEqubGroupsTable::configure($table);
@@ -71,14 +79,33 @@ class MemberEqubGroupResource extends Resource
     {
         return [
             'index' => ListMemberEqubGroups::route('/'),
+            'create' => CreateMemberEqubGroup::route('/create'),
+            'edit' => EditMemberEqubGroup::route('/{record}/edit'),
             'ledger' => GroupLedger::route('/{record}/ledger'),
         ];
     }
 
+    public static function canEdit($record): bool
+    {
+        return Auth::check() && (
+            Auth::user()->hasRole('Super Admin')
+            || Auth::user()->can('member-equb-groups.edit')
+        );
+    }
+
+    public static function canDelete($record): bool
+    {
+        return Auth::check() && (
+            Auth::user()->hasRole('Super Admin')
+            || Auth::user()->can('member-equb-groups.delete')
+        );
+    }
+
     public static function canCreate(): bool
     {
-        // Group Equbs are created by members in the app, never here.
-        return false;
+        // Members create these in the app; admins can also open one on a
+        // member's behalf, which skips the approval queue.
+        return Auth::check() && (Auth::user()->hasRole('Super Admin') || Auth::user()->can('member-equb-groups.create') ?? true);
     }
 
     public static function shouldRegisterNavigation(): bool

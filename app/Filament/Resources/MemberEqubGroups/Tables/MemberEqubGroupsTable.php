@@ -4,17 +4,20 @@ namespace App\Filament\Resources\MemberEqubGroups\Tables;
 
 use App\Enums\EqubGroupModerationStatus;
 use App\Enums\EqubGroupStatus;
-use App\Enums\WinnerSelectionMode;
+use App\Filament\Resources\MemberEqubGroups\MemberEqubGroupResource;
 use App\Models\EqubGroup;
 use App\Services\GroupDrawService;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
+use Filament\Actions\DeleteAction;
+use Filament\Actions\EditAction;
 use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
+use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
 use Illuminate\Support\Facades\Auth;
 
@@ -31,13 +34,17 @@ class MemberEqubGroupsTable
                 TextColumn::make('package.name')->label(__('filament.equb_group.package'))->toggleable(),
                 TextColumn::make('fixed_contribution_amount')->label(__('filament.equb_group.contribution'))->money('ETB')->sortable(),
                 TextColumn::make('current_members_count')->label(__('filament.equb_group.current_members_count'))->sortable(),
-                TextColumn::make('winner_selection_mode')
-                    ->label(__('filament.member_equb_group.winner_mode'))
+                TextColumn::make('has_won_round')
+                    ->label(__('filament.member_equb_group.winning_status'))
                     ->badge()
-                    ->formatStateUsing(fn (?WinnerSelectionMode $state): string => $state?->label() ?? '-'),
-                TextColumn::make('winner_split_plan')
-                    ->label(__('filament.member_equb_group.split_plan'))
-                    ->formatStateUsing(fn ($state): string => is_array($state) && $state !== [] ? implode(' + ', $state) : '—'),
+                    ->sortable()
+                    ->formatStateUsing(fn ($state, EqubGroup $record): string => $state
+                        ? __('filament.member_equb_group.won_on', [
+                            'date' => $record->won_round_at?->format('d M Y') ?? '',
+                        ])
+                        : __('filament.member_equb_group.not_won'))
+                    ->color(fn ($state): string => $state ? 'success' : 'gray')
+                    ->icon(fn ($state): string => $state ? 'heroicon-m-trophy' : 'heroicon-m-clock'),
                 TextColumn::make('moderation_status')
                     ->label(__('filament.member_equb_group.moderation'))
                     ->badge()
@@ -46,6 +53,12 @@ class MemberEqubGroupsTable
                 TextColumn::make('created_at')->label(__('filament.user.created_at'))->dateTime()->sortable()->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([
+                TernaryFilter::make('has_won_round')
+                    ->label(__('filament.member_equb_group.winning_status'))
+                    ->trueLabel(__('filament.member_equb_group.filter_won'))
+                    ->falseLabel(__('filament.member_equb_group.filter_not_won'))
+                    ->placeholder(__('filament.member_equb_group.filter_all')),
+
                 SelectFilter::make('moderation_status')
                     ->label(__('filament.member_equb_group.moderation'))
                     ->options(collect(EqubGroupModerationStatus::cases())
@@ -58,12 +71,23 @@ class MemberEqubGroupsTable
                         ->toArray()),
             ])
             ->recordActions([
-                ActionGroup::make([
-                    Action::make('ledger')
-                        ->label(__('filament.member_equb_group.view_ledger'))
-                        ->icon('heroicon-o-banknotes')
-                        ->url(fn (EqubGroup $record): string => route('filament.admin.resources.member-equb-groups.ledger', ['record' => $record])),
+                // Kept out of the dropdown: these are the two things an admin
+                // reaches for constantly.
+                Action::make('ledger')
+                    ->label(__('filament.member_equb_group.view_ledger'))
+                    ->icon('heroicon-o-banknotes')
+                    ->color('gray')
+                    ->button()
+                    ->outlined()
+                    ->url(fn (EqubGroup $record): string => MemberEqubGroupResource::getUrl('ledger', ['record' => $record])),
 
+                EditAction::make()
+                    ->label(__('filament.member_equb_group.edit'))
+                    ->icon('heroicon-o-pencil-square')
+                    ->button()
+                    ->outlined(),
+
+                ActionGroup::make([
                     Action::make('approve')
                         ->label(__('filament.member_equb_group.approve'))
                         ->icon('heroicon-o-check-circle')
@@ -145,6 +169,7 @@ class MemberEqubGroupsTable
                                 ->success()
                                 ->send();
                         }),
+                    DeleteAction::make(),
                 ])->iconButton(),
             ])
             ->defaultSort('created_at', 'desc');

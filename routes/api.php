@@ -139,6 +139,11 @@ Route::middleware(['jwt.auth', 'active.user'])->group(function () {
         // Group Equb: member-created private groups
         // ---------------------------------------------------------------
         Route::post('member-lookup', [MemberDirectoryController::class, 'lookup']);
+        Route::get('member-search', [MemberDirectoryController::class, 'search']);
+        Route::post('member-search', [MemberDirectoryController::class, 'search']);
+
+        // Platform Equbs a member can build a Group Equb inside.
+        Route::get('joinable-equb-groups', [MyEqubGroupController::class, 'joinableGroups']);
 
         Route::prefix('my-equb-groups')->group(function () {
             Route::get('/', [MyEqubGroupController::class, 'index']);

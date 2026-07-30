@@ -18,6 +18,9 @@ class EqubGroup extends Model
     protected $fillable = [
         'equb_package_id',
         'owner_member_id',
+        'parent_equb_group_id',
+        'has_won_round',
+        'won_round_at',
         'name',
         'visibility',
         'moderation_status',
@@ -85,6 +88,8 @@ class EqubGroup extends Model
             'payout_per_winner' => 'decimal:2',
             'draw_requires_up_to_date' => 'boolean',
             'allow_member_invites' => 'boolean',
+            'has_won_round' => 'boolean',
+            'won_round_at' => 'datetime',
         ];
     }
 
@@ -118,6 +123,18 @@ class EqubGroup extends Model
     public function owner(): BelongsTo
     {
         return $this->belongsTo(Member::class, 'owner_member_id');
+    }
+
+    /** The running platform Equb this Group Equb takes part in. */
+    public function parentGroup(): BelongsTo
+    {
+        return $this->belongsTo(EqubGroup::class, 'parent_equb_group_id');
+    }
+
+    /** Member-created Group Equbs competing inside this platform Equb. */
+    public function subGroups(): HasMany
+    {
+        return $this->hasMany(EqubGroup::class, 'parent_equb_group_id');
     }
 
     public function approvedBy(): BelongsTo
@@ -252,5 +269,36 @@ class EqubGroup extends Model
     public function nextRoundNumber(): int
     {
         return (int) $this->draws()->count() + 1;
+    }
+
+    /**
+     * What one person contributes per round. Always inherited from the parent
+     * Equb's package so a Group Equb never carries a hand-typed amount.
+     */
+    public function contributionPerPerson(): float
+    {
+        $source = $this->parentGroup ?? $this;
+
+        if ((float) $source->fixed_contribution_amount > 0) {
+            return (float) $source->fixed_contribution_amount;
+        }
+
+        return (float) ($source->package?->fixed_contribution_amount ?? 0);
+    }
+
+    /** Everyone's contribution for a single round: per person x head-count. */
+    public function roundTotal(): float
+    {
+        return $this->contributionPerPerson() * max(0, (int) $this->current_members_count);
+    }
+
+    /** Group Equbs on this parent that have not won a round yet. */
+    public function eligibleSubGroups()
+    {
+        return $this->subGroups()
+            ->whereNotNull('owner_member_id')
+            ->where('moderation_status', EqubGroupModerationStatus::Approved)
+            ->whereNotIn('status', [EqubGroupStatus::Cancelled, EqubGroupStatus::Completed])
+            ->where('has_won_round', false);
     }
 }

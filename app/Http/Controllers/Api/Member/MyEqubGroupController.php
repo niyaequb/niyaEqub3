@@ -33,6 +33,39 @@ class MyEqubGroupController extends Controller
         protected GroupDrawService $draws,
     ) {}
 
+    /**
+     * Platform Equbs a member can build a Group Equb inside.
+     * The contribution per person comes from here, never from the member.
+     */
+    public function joinableGroups(Request $request): JsonResponse
+    {
+        $groups = EqubGroup::query()
+            ->whereNull('owner_member_id')
+            ->where('visibility', EqubGroupVisibility::Public)
+            ->whereIn('status', [
+                EqubGroupStatus::Registration->value,
+                EqubGroupStatus::Running->value,
+            ])
+            ->with('package:id,name')
+            ->orderBy('name')
+            ->get();
+
+        return response()->json([
+            'status' => 'success',
+            'data' => $groups->map(fn (EqubGroup $g): array => [
+                'id' => $g->id,
+                'name' => $g->name,
+                'package_name' => $g->package?->name,
+                'status' => $g->status?->value,
+                'contribution_per_person' => round($g->contributionPerPerson(), 2),
+                'contribution_frequency_days' => (int) $g->contribution_frequency_days,
+                'rounds_total' => $g->totalRounds(),
+                'equb_start_date' => $g->equb_start_date?->toIso8601String(),
+                'equb_end_date' => $g->equb_end_date?->toIso8601String(),
+            ])->values(),
+        ]);
+    }
+
     /** Groups I created or was invited into. */
     public function index(Request $request): JsonResponse
     {

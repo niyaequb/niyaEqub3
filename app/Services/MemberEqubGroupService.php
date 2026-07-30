@@ -41,44 +41,42 @@ class MemberEqubGroupService
      */
     public function create(Member $owner, array $data): array
     {
-        $package = EqubPackage::find($data['equb_package_id']);
+        $parent = EqubGroup::with('package')->find($data['parent_equb_group_id'] ?? null);
 
-        if (! $package || ! $package->is_active) {
-            return ['success' => false, 'message' => 'That Equb package is not available.'];
+        if (! $parent || $parent->isMemberCreated()) {
+            return ['success' => false, 'message' => 'Choose an active Equb to join.'];
         }
 
-        $amount = $this->resolveContribution($package, $data['contribution_amount'] ?? null);
-
-        if ($amount === null) {
+        // A Group Equb can be opened while the parent is still being set up or
+        // already running. Only a finished or cancelled Equb is refused.
+        if (in_array($parent->status, [EqubGroupStatus::Completed, EqubGroupStatus::Cancelled], true)) {
             return [
                 'success' => false,
-                'message' => 'Choose a contribution between '
-                    .number_format((float) $package->min_contribution_amount, 2).' and '
-                    .number_format((float) $package->max_contribution_amount, 2).' ETB.',
+                'message' => 'That Equb is '.($parent->status?->value ?? 'closed').', so no new groups can join it.',
             ];
         }
 
-        $maxMembers = (int) ($data['max_members'] ?? $package->max_members ?? 0);
+        // Money is never typed in. The contribution per person is inherited from
+        // the parent Equb's package; every total follows the head-count.
+        $amount = $parent->contributionPerPerson();
 
-        if ($maxMembers < 2) {
-            return ['success' => false, 'message' => 'A group Equb needs room for at least 2 members.'];
-        }
-
-        $mode = WinnerSelectionMode::from($data['winner_selection_mode'] ?? WinnerSelectionMode::Single->value);
-        $modeError = $this->validateWinnerConfig($mode, $data, $maxMembers);
-
-        if ($modeError !== null) {
-            return ['success' => false, 'message' => $modeError];
+        if ($amount <= 0) {
+            return [
+                'success' => false,
+                'message' => 'That Equb has no contribution amount set. Ask an admin to check the package.',
+            ];
         }
 
         $needsApproval = (bool) config('services.equb.group_requires_approval', true);
-        $frequency = (int) ($package->contribution_frequency_days ?: 1);
+        $frequency = (int) ($parent->contribution_frequency_days ?: 1);
+        $package = $parent->package;
 
         try {
-            $group = DB::transaction(function () use ($owner, $package, $data, $amount, $maxMembers, $mode, $needsApproval, $frequency) {
+            $group = DB::transaction(function () use ($owner, $parent, $package, $data, $amount, $needsApproval, $frequency) {
                 $group = EqubGroup::create([
-                    'equb_package_id' => $package->id,
+                    'equb_package_id' => $package?->id,
                     'owner_member_id' => $owner->id,
+                    'parent_equb_group_id' => $parent->id,
                     'name' => $data['name'],
                     'description' => $data['description'] ?? null,
                     'visibility' => EqubGroupVisibility::Private,
@@ -89,19 +87,20 @@ class MemberEqubGroupService
                     'allow_member_invites' => (bool) ($data['allow_member_invites'] ?? false),
                     'fixed_contribution_amount' => $amount,
                     'contribution_frequency_days' => $frequency,
-                    'duration_type' => $package->duration_type,
-                    'duration_value' => $data['duration_value'] ?? $maxMembers,
-                    'duration_unit' => $package->duration_unit ?? \App\Enums\EqubDurationUnit::Days,
-                    'terms_content' => $package->terms_content,
+                    'duration_type' => $parent->duration_type,
+                    'duration_value' => $parent->duration_value,
+                    'duration_unit' => $parent->duration_unit ?? \App\Enums\EqubDurationUnit::Days,
+                    'terms_content' => $parent->terms_content ?? $package?->terms_content,
                     'registration_open_at' => now(),
-                    'equb_start_date' => $data['equb_start_date'] ?? null,
-                    'max_members' => $maxMembers,
+                    'equb_start_date' => $parent->equb_start_date,
+                    // No setup cap: the head-count is whoever accepts an invite.
+                    // "How many members" is a draw-time question now.
+                    'max_members' => null,
                     'status' => EqubGroupStatus::Registration,
                     'draw_type' => \App\Enums\EqubDrawType::Manual,
-                    'winner_selection_mode' => $mode,
-                    'winners_per_draw' => $data['winners_per_draw'] ?? null,
-                    'min_winners_per_draw' => $data['min_winners_per_draw'] ?? null,
-                    'max_winners_per_draw' => $data['max_winners_per_draw'] ?? null,
+                    // Winners are drawn at the parent Equb level from the Equb
+                    // Draws page, so the group carries no winner configuration.
+                    'winner_selection_mode' => WinnerSelectionMode::Manual,
                     'draw_requires_up_to_date' => (bool) ($data['draw_requires_up_to_date'] ?? true),
                     'current_members_count' => 0,
                 ]);
@@ -116,7 +115,7 @@ class MemberEqubGroupService
 
                 $joined['membership']->update(['role' => EqubMembershipRole::Owner]);
 
-                return $group->fresh(['package', 'owner.user']);
+                return $group->fresh(['package', 'owner.user', 'parentGroup']);
             });
         } catch (\Throwable $e) {
             Log::error('Group Equb creation failed: '.$e->getMessage());
@@ -226,6 +225,91 @@ class MemberEqubGroupService
             'skipped' => $skipped,
             'message' => $invited > 0 ? "{$invited} invitation(s) sent." : 'No invitations were sent.',
         ];
+    }
+
+    /**
+     * Put members straight into the group, no invitation round-trip.
+     *
+     * This is the admin path: when a staff member builds a group in the panel
+     * they are recording people who have already agreed, so the group should
+     * show the real head-count immediately. The app still uses invite() so
+     * members opt in themselves.
+     *
+     * @param  array<int>  $memberIds
+     * @return array{success: bool, added: int, skipped: array<int, string>, message: string}
+     */
+    public function addMembersDirectly(EqubGroup $group, array $memberIds): array
+    {
+        $added = 0;
+        $skipped = [];
+
+        foreach (array_unique($memberIds) as $memberId) {
+            $member = Member::with('user')->find($memberId);
+
+            if (! $member) {
+                $skipped[] = "Member #{$memberId} not found";
+
+                continue;
+            }
+
+            if ($this->alreadyInGroup($group, $member->id)) {
+                continue;
+            }
+
+            $joined = $this->membershipService->joinEqub($member->id, $group->id);
+
+            if (! $joined['success']) {
+                $skipped[] = ($member->full_name ?? "Member #{$memberId}").': '.($joined['message'] ?? 'could not join');
+
+                continue;
+            }
+
+            $joined['membership']->update(['role' => EqubMembershipRole::Member]);
+
+            // Any pending invitation is now moot.
+            $group->invitations()
+                ->pending()
+                ->where('member_id', $member->id)
+                ->update([
+                    'status' => EqubInvitationStatus::Accepted,
+                    'responded_at' => now(),
+                ]);
+
+            $this->subscribeToTopic($member, $group);
+            $this->notifyAdded($group, $member);
+
+            $added++;
+        }
+
+        $group->refresh();
+
+        return [
+            'success' => true,
+            'added' => $added,
+            'skipped' => $skipped,
+            'message' => $added > 0
+                ? "{$added} member(s) added."
+                : 'No new members were added.',
+        ];
+    }
+
+    protected function notifyAdded(EqubGroup $group, Member $member): void
+    {
+        $userId = $member->user?->id;
+
+        if (! $userId) {
+            return;
+        }
+
+        $this->fcmService->sendToUser(
+            $userId,
+            [
+                'type' => 'equb_group_added',
+                'equb_group_id' => (string) $group->id,
+            ],
+            'Added to an Equb group',
+            "You are now part of \"{$group->name}\"."
+        );
     }
 
     /**
