@@ -4,117 +4,87 @@ namespace App\Http\Controllers\Api\Member;
 
 use App\Http\Controllers\Controller;
 use App\Models\Member;
-use App\Services\SmsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\RateLimiter;
 
 /**
- * Finds people to invite into a group Equb.
+ * Finds people to add to a Group Equb.
  *
- * `lookup()` is an exact phone / referral-code match.
- * `search()` backs the "add members" autocomplete: a partial match on name or
- * phone, with a hard result cap and rate limiting so the member base cannot be
- * walked, returning only the fields the picker needs.
+ * Deliberately dependency-free: no constructor injection and no cache-backed
+ * rate limiter, because a failure in either takes the whole controller down
+ * and every route on it returns 500 before any logic runs.
+ *
+ * The query mirrors the one used by the admin panel's "Add members" picker,
+ * which is known to work against this schema.
  */
 class MemberDirectoryController extends Controller
 {
     /** Results are capped so a broad query cannot dump the member base. */
     protected const MAX_RESULTS = 20;
 
-    public function __construct(protected SmsService $smsService) {}
-
     /**
      * GET|POST /member/member-search?q=...
      *
-     * Runs from the first character so results appear while typing. Phone
-     * matching works on the last 8 digits, so 09xxxxxxxx finds a member stored
-     * as +2519xxxxxxxx and vice versa.
+     * Matches on member name, user name or phone. Phone matching uses the last
+     * 8 digits so 09xxxxxxxx finds someone stored as +2519xxxxxxxx.
      */
     public function search(Request $request): JsonResponse
     {
-        $term = trim((string) ($request->input('q')
-            ?? $request->input('query')
-            ?? $request->input('search')
-            ?? ''));
-
-<<<<<<< HEAD
-        if ($term === '') {
-=======
-        if (mb_strlen($term) < 1) {
->>>>>>> bde2286da060c83d6fecd3232b2e9f8149a3cf98
-            return response()->json(['status' => 'success', 'data' => []]);
-        }
-
-        $key = 'member-search:'.$request->user()->id;
-
-        if (RateLimiter::tooManyAttempts($key, 120)) {
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Too many searches. Please wait a moment.',
-            ], 429);
-        }
-
-        RateLimiter::hit($key, 60);
-
-        $myMemberId = $request->user()->member?->id;
-        $digits = preg_replace('/\D+/', '', $term);
-
         try {
+            $term = trim((string) ($request->input('q')
+                ?? $request->input('query')
+                ?? $request->input('search')
+                ?? ''));
+
+            if ($term === '') {
+                return response()->json(['status' => 'success', 'data' => []]);
+            }
+
+            $digits = preg_replace('/\D+/', '', $term);
+            $tail = $digits !== '' ? substr($digits, -8) : null;
+
             $members = Member::query()
-<<<<<<< HEAD
                 ->with('user:id,name,phone')
-                ->when($myMemberId, fn ($q) => $q->whereKeyNot($myMemberId))
-                ->where(function ($query) use ($term, $digits) {
+                ->where(function ($query) use ($term, $tail) {
                     $query->where('full_name', 'like', "%{$term}%")
-                        ->orWhereHas('user', function ($u) use ($term, $digits) {
+                        ->orWhereHas('user', function ($u) use ($term, $tail) {
                             $u->where('name', 'like', "%{$term}%");
 
-                            // Match a partial number whatever form it is stored in.
-                            if ($digits !== '') {
-                                $tail = mb_substr($digits, -8);
+                            if ($tail !== null) {
                                 $u->orWhere('phone', 'like', "%{$tail}%");
                             }
                         });
                 })
-                ->orderBy('full_name')
                 ->limit(self::MAX_RESULTS)
-=======
-                ->with('user:id,phone,name')
-                ->when($myMemberId, fn ($q) => $q->whereKeyNot($myMemberId))
-                ->where(function ($q) use ($term) {
-                    $q->whereHas('user', fn ($u) => $u
-                        ->where('phone', 'like', "%{$term}%")
-                        ->orWhere('name', 'like', "%{$term}%"))
-                        ->orWhere('full_name', 'like', "%{$term}%");
-                })
-                ->limit(20)
->>>>>>> bde2286da060c83d6fecd3232b2e9f8149a3cf98
                 ->get();
+
+            $myMemberId = $request->user()?->member?->id;
+
+            $data = $members
+                ->reject(fn (Member $m): bool => $myMemberId !== null && (int) $m->id === (int) $myMemberId)
+                ->map(fn (Member $m): array => [
+                    'member_id' => $m->id,
+                    'name' => $m->full_name ?: ($m->user?->name ?? 'Member'),
+                    'phone' => $m->user?->phone,
+                ])
+                ->values();
+
+            return response()->json(['status' => 'success', 'data' => $data]);
         } catch (\Throwable $e) {
-            Log::error('Member search failed: '.$e->getMessage());
+            Log::error('Member search failed: '.$e->getMessage(), [
+                'query' => $request->input('q'),
+                'exception' => $e,
+            ]);
 
+            // Never 500 a type-ahead: an empty list with a message is far less
+            // disruptive than an error dialog on every keystroke.
             return response()->json([
-                'status' => 'error',
-                'message' => 'Could not search members right now.',
-            ], 500);
+                'status' => 'success',
+                'data' => [],
+                'message' => 'Search is unavailable right now.',
+            ]);
         }
-
-        return response()->json([
-            'status' => 'success',
-<<<<<<< HEAD
-            // No avatar URL here on purpose: that accessor hits the storage
-=======
-            // No avatar URL here on purpose: that accessor touches the storage
->>>>>>> bde2286da060c83d6fecd3232b2e9f8149a3cf98
-            // disk once per row, which turns a type-ahead into a slow request.
-            'data' => $members->map(fn (Member $m): array => [
-                'member_id' => $m->id,
-                'name' => $m->full_name ?: ($m->user?->name ?? 'Member'),
-                'phone' => $m->user?->phone,
-            ])->values(),
-        ]);
     }
 
     /**
@@ -127,28 +97,26 @@ class MemberDirectoryController extends Controller
             'referral_code' => ['required_without:phone', 'nullable', 'string', 'max:20'],
         ]);
 
-        $key = 'member-lookup:'.$request->user()->id;
+        try {
+            $query = Member::query()->with('user:id,phone,name');
 
-        if (RateLimiter::tooManyAttempts($key, 60)) {
+            if ($request->filled('phone')) {
+                $phone = $this->normalisePhone((string) $request->input('phone'));
+                $query->whereHas('user', fn ($q) => $q->where('phone', $phone));
+            } else {
+                $code = strtoupper((string) $request->input('referral_code'));
+                $query->whereHas('user', fn ($q) => $q->where('referral_code', $code));
+            }
+
+            $member = $query->first();
+        } catch (\Throwable $e) {
+            Log::error('Member lookup failed: '.$e->getMessage(), ['exception' => $e]);
+
             return response()->json([
                 'status' => 'error',
-                'message' => 'Too many lookups. Please wait a minute.',
-            ], 429);
+                'message' => 'Could not look that up right now.',
+            ], 500);
         }
-
-        RateLimiter::hit($key, 60);
-
-        $query = Member::query()->with('user:id,phone,name');
-
-        if ($request->filled('phone')) {
-            $phone = $this->smsService->formatPhoneNumber($request->input('phone'));
-            $query->whereHas('user', fn ($q) => $q->where('phone', $phone));
-        } else {
-            $code = strtoupper($request->input('referral_code'));
-            $query->whereHas('user', fn ($q) => $q->where('referral_code', $code));
-        }
-
-        $member = $query->first();
 
         if (! $member) {
             return response()->json([
@@ -166,5 +134,32 @@ class MemberDirectoryController extends Controller
                 'phone' => $member->user?->phone,
             ],
         ]);
+    }
+
+    /**
+     * 09xxxxxxxx and 9xxxxxxxx both become +2519xxxxxxxx. Done here rather than
+     * through SmsService so this controller has no constructor dependencies.
+     */
+    protected function normalisePhone(string $input): string
+    {
+        $clean = preg_replace('/[^0-9+]/', '', $input) ?? '';
+
+        if (str_starts_with($clean, '+251')) {
+            return $clean;
+        }
+
+        if (str_starts_with($clean, '251')) {
+            return '+'.$clean;
+        }
+
+        if (str_starts_with($clean, '0')) {
+            return '+251'.substr($clean, 1);
+        }
+
+        if (strlen($clean) === 9 && (str_starts_with($clean, '9') || str_starts_with($clean, '7'))) {
+            return '+251'.$clean;
+        }
+
+        return $clean;
     }
 }
