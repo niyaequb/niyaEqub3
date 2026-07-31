@@ -90,7 +90,10 @@ class MemberEqubGroupService
                     'duration_type' => $parent->duration_type,
                     'duration_value' => $parent->duration_value,
                     'duration_unit' => $parent->duration_unit ?? \App\Enums\EqubDurationUnit::Days,
-                    'terms_content' => $parent->terms_content ?? $package?->terms_content,
+                    // Terms live on the parent Equb only. Reading them through
+                    // EqubGroup::termsContent() means an admin editing the
+                    // Equb's terms updates every group inside it.
+                    'terms_content' => null,
                     'registration_open_at' => now(),
                     'equb_start_date' => $parent->equb_start_date,
                     // No setup cap: the head-count is whoever accepts an invite.
@@ -154,6 +157,9 @@ class MemberEqubGroupService
         $skipped = [];
         $capacity = $this->remainingCapacity($group);
 
+        // Someone added by the creator gets an invitation to accept or decline.
+        // Being put into a group carries a real financial obligation, so it is
+        // their call.
         foreach ($memberIds as $memberId) {
             if ($capacity <= 0) {
                 $skipped[] = 'Group is full';
@@ -187,6 +193,7 @@ class MemberEqubGroupService
                 'phone' => $member->user?->phone,
                 'message' => $message,
                 'status' => EqubInvitationStatus::Pending,
+                'is_request' => false,
             ]);
 
             $this->notifyInvitee($group, $inviter, $invitation, $member);
@@ -194,7 +201,7 @@ class MemberEqubGroupService
             $capacity--;
         }
 
-        // Phone numbers that are not on the platform yet: send a join link by SMS.
+        // Phone numbers with no account yet get the group's code by SMS.
         foreach ($phones as $phone) {
             if ($capacity <= 0) {
                 $skipped[] = 'Group is full';
@@ -210,6 +217,10 @@ class MemberEqubGroupService
 
                     continue;
                 }
+            } elseif ($group->invitations()->pending()->where('phone', $normalised)->exists()) {
+                $skipped[] = $normalised.' was already invited';
+
+                continue;
             }
 
             $invitation = EqubGroupInvitation::create([
@@ -219,6 +230,7 @@ class MemberEqubGroupService
                 'phone' => $normalised,
                 'message' => $message,
                 'status' => EqubInvitationStatus::Pending,
+                'is_request' => false,
             ]);
 
             $this->notifyInvitee($group, $inviter, $invitation, $existing);
@@ -230,17 +242,18 @@ class MemberEqubGroupService
             'success' => $invited > 0 || $skipped === [],
             'invited' => $invited,
             'skipped' => $skipped,
-            'message' => $invited > 0 ? "{$invited} invitation(s) sent." : 'No invitations were sent.',
+            'message' => $invited > 0
+                ? "{$invited} invitation(s) sent."
+                : 'No invitations were sent.',
         ];
     }
 
     /**
-     * Put members straight into the group, no invitation round-trip.
+     * Put members straight into the group.
      *
-     * This is the admin path: when a staff member builds a group in the panel
-     * they are recording people who have already agreed, so the group should
-     * show the real head-count immediately. The app still uses invite() so
-     * members opt in themselves.
+     * Used by both the admin panel and the app's invite screen: whoever is
+     * adding these people already knows them, so they become members
+     * immediately and simply get told about it.
      *
      * @param  array<int>  $memberIds
      * @return array{success: bool, added: int, skipped: array<int, string>, message: string}
@@ -320,12 +333,12 @@ class MemberEqubGroupService
     }
 
     /**
-     * Someone used an invite code and wants in. This creates a pending request
-     * for the owner to approve — nobody joins a group by knowing a code alone.
+     * Someone used an invite code. Having the code is the permission: they
+     * join immediately, and the creator is told about it.
      *
-     * @return array{success: bool, message: string, invitation?: EqubGroupInvitation}
+     * @return array{success: bool, message: string}
      */
-    public function requestToJoin(EqubGroup $group, Member $member): array
+    public function joinWithCode(EqubGroup $group, Member $member): array
     {
         if (in_array($group->status, [EqubGroupStatus::Completed, EqubGroupStatus::Cancelled], true)) {
             return ['success' => false, 'message' => 'This Equb is closed.'];
@@ -339,37 +352,33 @@ class MemberEqubGroupService
             return ['success' => false, 'message' => 'You are already in this Equb.'];
         }
 
-        $existing = $group->invitations()->pending()->where('member_id', $member->id)->first();
-
-        if ($existing) {
-            return [
-                'success' => false,
-                'message' => $existing->is_request
-                    ? 'You have already asked to join. The group creator will respond.'
-                    : 'You already have an invitation to this Equb. Check your invitations.',
-            ];
-        }
-
         if ($this->remainingCapacity($group) <= 0) {
             return ['success' => false, 'message' => 'This Equb is already full.'];
         }
 
-        $invitation = EqubGroupInvitation::create([
-            'equb_group_id' => $group->id,
-            // The requester is both sides of the row: they raised it themselves.
-            'invited_by_member_id' => $member->id,
-            'member_id' => $member->id,
-            'phone' => $member->user?->phone,
-            'status' => EqubInvitationStatus::Pending,
-            'is_request' => true,
-        ]);
+        $result = $this->addMembersDirectly($group, [$member->id]);
 
-        $this->notifyOwnerOfRequest($group, $member);
+        if (($result['added'] ?? 0) < 1) {
+            return [
+                'success' => false,
+                'message' => $result['skipped'][0] ?? 'Could not join this Equb.',
+            ];
+        }
+
+        // Any invitation already sitting there is now satisfied.
+        $group->invitations()
+            ->pending()
+            ->where('member_id', $member->id)
+            ->update([
+                'status' => EqubInvitationStatus::Accepted,
+                'responded_at' => now(),
+            ]);
+
+        $this->notifyOwnerOfJoin($group, $member);
 
         return [
             'success' => true,
-            'message' => 'Request sent. The group creator will approve or decline it.',
-            'invitation' => $invitation,
+            'message' => 'You have joined "'.$group->name.'".',
         ];
     }
 

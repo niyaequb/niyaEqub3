@@ -61,6 +61,8 @@ class MyEqubGroupController extends Controller
                 'contribution_per_person' => round($g->contributionPerPerson(), 2),
                 'contribution_frequency_days' => (int) $g->contribution_frequency_days,
                 'rounds_total' => $g->totalRounds(),
+                // Straight from equb_groups.terms_content on this Equb.
+                'terms_content' => $g->termsContent(),
                 'equb_start_date' => $g->equb_start_date?->toIso8601String(),
                 'equb_end_date' => $g->equb_end_date?->toIso8601String(),
             ])->values(),
@@ -420,7 +422,7 @@ class MyEqubGroupController extends Controller
             ], 404);
         }
 
-        $result = $this->groups->requestToJoin($group, $member);
+        $result = $this->groups->joinWithCode($group, $member);
 
         return response()->json([
             'status' => $result['success'] ? 'success' : 'error',
@@ -476,22 +478,51 @@ class MyEqubGroupController extends Controller
         ], $result['success'] ? 200 : 422);
     }
 
-    /** Look up a private group from a shared invite code. */
+    /** Preview a group from a shared invite code, before asking to join. */
     public function findByInviteCode(Request $request, string $code): JsonResponse
     {
         $group = EqubGroup::query()
-            ->where('invite_code', strtoupper($code))
+            ->where('invite_code', strtoupper(trim($code)))
             ->where('visibility', EqubGroupVisibility::Private)
-            ->with(['package', 'owner.user'])
+            ->with(['package', 'owner.user', 'parentGroup'])
+            ->withCount(['memberships as active_members' => fn ($q) => $q->where('status', \App\Enums\EqubMembershipStatus::Active)])
             ->first();
 
         if (! $group) {
-            return response()->json(['status' => 'error', 'message' => 'No Equb found for that code.'], 404);
+            return response()->json([
+                'status' => 'error',
+                'message' => 'No Equb found for that code. Check it and try again.',
+            ], 404);
         }
+
+        $member = $this->member($request);
+
+        $pending = $member
+            ? $group->invitations()->pending()->where('member_id', $member->id)->first()
+            : null;
+
+        $alreadyIn = $member && EqubMembership::where('equb_group_id', $group->id)
+            ->where('member_id', $member->id)
+            ->exists();
 
         return response()->json([
             'status' => 'success',
-            'data' => new MemberEqubGroupResource($group),
+            'data' => [
+                'id' => $group->id,
+                'name' => $group->name,
+                'description' => $group->description,
+                'invite_code' => $group->invite_code,
+                'owner_name' => $group->owner?->full_name,
+                'equb_name' => $group->parentGroup?->name ?? $group->package?->name,
+                'members_count' => (int) $group->active_members,
+                'contribution_per_person' => round($group->contributionPerPerson(), 2),
+                'contribution_frequency_days' => (int) $group->contribution_frequency_days,
+                'rounds_total' => $group->totalRounds(),
+                // The parent Equb's terms, not a copy held on this group.
+                'terms_content' => $group->termsContent(),
+                'already_member' => (bool) $alreadyIn,
+                'request_pending' => $pending !== null,
+            ],
         ]);
     }
 

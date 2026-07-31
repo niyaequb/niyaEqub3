@@ -32,7 +32,7 @@ class MemberEqubGroupResource extends JsonResource
             'duration_type' => $this->duration_type?->value,
             'duration_value' => $this->duration_value,
             'duration_unit' => $this->duration_unit?->value,
-            'terms_and_conditions' => $this->terms_content ?? $this->package?->terms_content,
+            'terms_and_conditions' => $this->termsContent(),
 
             'max_members' => $this->max_members,
             'current_members_count' => (int) $this->current_members_count,

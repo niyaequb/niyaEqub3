@@ -286,6 +286,22 @@ class EqubGroup extends Model
         return (float) ($source->package?->fixed_contribution_amount ?? 0);
     }
 
+    /**
+     * The terms a member agrees to before creating or joining.
+     *
+     * Always the platform Equb's own terms_content, set by an admin on the Equb
+     * Group. A Group Equb never carries its own copy, so editing the Equb's
+     * terms updates every group inside it.
+     */
+    public function termsContent(): ?string
+    {
+        $source = $this->parentGroup ?? $this;
+
+        $terms = trim((string) ($source->terms_content ?? ''));
+
+        return $terms !== '' ? $terms : null;
+    }
+
     /** Everyone's contribution for a single round: per person x head-count. */
     public function roundTotal(): float
     {
