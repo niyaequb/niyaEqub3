@@ -39,7 +39,11 @@ class MemberDirectoryController extends Controller
             ?? $request->input('search')
             ?? ''));
 
+<<<<<<< HEAD
         if ($term === '') {
+=======
+        if (mb_strlen($term) < 1) {
+>>>>>>> bde2286da060c83d6fecd3232b2e9f8149a3cf98
             return response()->json(['status' => 'success', 'data' => []]);
         }
 
@@ -59,6 +63,7 @@ class MemberDirectoryController extends Controller
 
         try {
             $members = Member::query()
+<<<<<<< HEAD
                 ->with('user:id,name,phone')
                 ->when($myMemberId, fn ($q) => $q->whereKeyNot($myMemberId))
                 ->where(function ($query) use ($term, $digits) {
@@ -75,6 +80,17 @@ class MemberDirectoryController extends Controller
                 })
                 ->orderBy('full_name')
                 ->limit(self::MAX_RESULTS)
+=======
+                ->with('user:id,phone,name')
+                ->when($myMemberId, fn ($q) => $q->whereKeyNot($myMemberId))
+                ->where(function ($q) use ($term) {
+                    $q->whereHas('user', fn ($u) => $u
+                        ->where('phone', 'like', "%{$term}%")
+                        ->orWhere('name', 'like', "%{$term}%"))
+                        ->orWhere('full_name', 'like', "%{$term}%");
+                })
+                ->limit(20)
+>>>>>>> bde2286da060c83d6fecd3232b2e9f8149a3cf98
                 ->get();
         } catch (\Throwable $e) {
             Log::error('Member search failed: '.$e->getMessage());
@@ -87,7 +103,11 @@ class MemberDirectoryController extends Controller
 
         return response()->json([
             'status' => 'success',
+<<<<<<< HEAD
             // No avatar URL here on purpose: that accessor hits the storage
+=======
+            // No avatar URL here on purpose: that accessor touches the storage
+>>>>>>> bde2286da060c83d6fecd3232b2e9f8149a3cf98
             // disk once per row, which turns a type-ahead into a slow request.
             'data' => $members->map(fn (Member $m): array => [
                 'member_id' => $m->id,
