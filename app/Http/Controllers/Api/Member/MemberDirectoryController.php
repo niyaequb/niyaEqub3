@@ -7,6 +7,7 @@ use App\Models\Member;
 use App\Services\SmsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\RateLimiter;
 
 /**
@@ -106,7 +107,7 @@ class MemberDirectoryController extends Controller
             ?? $request->input('search')
             ?? ''));
 
-        if (mb_strlen($term) < 2) {
+        if (mb_strlen($term) < 1) {
             return response()->json(['status' => 'success', 'data' => []]);
         }
 
@@ -123,25 +124,35 @@ class MemberDirectoryController extends Controller
 
         $myMemberId = $request->user()->member?->id;
 
-        $members = Member::query()
-            ->with('user:id,phone,name,profile_picture')
-            ->when($myMemberId, fn ($q) => $q->whereKeyNot($myMemberId))
-            ->where(function ($q) use ($term) {
-                $q->whereHas('user', fn ($u) => $u
-                    ->where('phone', 'like', "%{$term}%")
-                    ->orWhere('name', 'like', "%{$term}%"))
-                    ->orWhere('full_name', 'like', "%{$term}%");
-            })
-            ->limit(20)
-            ->get();
+        try {
+            $members = Member::query()
+                ->with('user:id,phone,name')
+                ->when($myMemberId, fn ($q) => $q->whereKeyNot($myMemberId))
+                ->where(function ($q) use ($term) {
+                    $q->whereHas('user', fn ($u) => $u
+                        ->where('phone', 'like', "%{$term}%")
+                        ->orWhere('name', 'like', "%{$term}%"))
+                        ->orWhere('full_name', 'like', "%{$term}%");
+                })
+                ->limit(20)
+                ->get();
+        } catch (\Throwable $e) {
+            Log::error('Member search failed: '.$e->getMessage());
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Could not search members right now.',
+            ], 500);
+        }
 
         return response()->json([
             'status' => 'success',
+            // No avatar URL here on purpose: that accessor touches the storage
+            // disk once per row, which turns a type-ahead into a slow request.
             'data' => $members->map(fn (Member $m): array => [
                 'member_id' => $m->id,
-                'name' => $m->full_name ?? $m->user?->name ?? 'Member',
+                'name' => $m->full_name ?: ($m->user?->name ?? 'Member'),
                 'phone' => $m->user?->phone,
-                'profile_picture_url' => $m->user?->profile_picture_url,
             ])->values(),
         ]);
     }
