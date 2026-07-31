@@ -148,7 +148,11 @@ Route::middleware(['jwt.auth', 'active.user'])->group(function () {
         Route::prefix('my-equb-groups')->group(function () {
             Route::get('/', [MyEqubGroupController::class, 'index']);
             Route::post('/', [MyEqubGroupController::class, 'store']);
+            Route::post('join-by-code', [MyEqubGroupController::class, 'joinByCode']);
             Route::get('by-code/{code}', [MyEqubGroupController::class, 'findByInviteCode']);
+
+            Route::get('{equbGroup}/requests', [MyEqubGroupController::class, 'joinRequests']);
+            Route::post('{equbGroup}/requests/{invitation}', [MyEqubGroupController::class, 'respondToRequest']);
 
             Route::get('{equbGroup}', [MyEqubGroupController::class, 'show']);
             Route::get('{equbGroup}/ledger', [MyEqubGroupController::class, 'ledger']);

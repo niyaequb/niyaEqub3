@@ -115,6 +115,11 @@ class MemberEqubGroupService
 
                 $joined['membership']->update(['role' => EqubMembershipRole::Owner]);
 
+                // The group goes live immediately. There is nothing to wait
+                // for: the parent Equb sets the schedule and the amounts, and
+                // members can keep joining after it starts.
+                $this->groupService->initialize($group);
+
                 return $group->fresh(['package', 'owner.user', 'parentGroup']);
             });
         } catch (\Throwable $e) {
@@ -139,8 +144,10 @@ class MemberEqubGroupService
             return ['success' => false, 'message' => 'You cannot invite members to this Equb.', 'invited' => 0, 'skipped' => []];
         }
 
-        if ($group->status !== EqubGroupStatus::Registration) {
-            return ['success' => false, 'message' => 'This Equb has already started.', 'invited' => 0, 'skipped' => []];
+        // A Group Equb runs from the moment it is created, so invitations have
+        // to keep working after it goes live. Only a closed Equb refuses them.
+        if (in_array($group->status, [EqubGroupStatus::Completed, EqubGroupStatus::Cancelled], true)) {
+            return ['success' => false, 'message' => 'This Equb is closed.', 'invited' => 0, 'skipped' => []];
         }
 
         $invited = 0;
@@ -313,6 +320,143 @@ class MemberEqubGroupService
     }
 
     /**
+     * Someone used an invite code and wants in. This creates a pending request
+     * for the owner to approve — nobody joins a group by knowing a code alone.
+     *
+     * @return array{success: bool, message: string, invitation?: EqubGroupInvitation}
+     */
+    public function requestToJoin(EqubGroup $group, Member $member): array
+    {
+        if (in_array($group->status, [EqubGroupStatus::Completed, EqubGroupStatus::Cancelled], true)) {
+            return ['success' => false, 'message' => 'This Equb is closed.'];
+        }
+
+        if ($group->isOwnedBy($member->id)) {
+            return ['success' => false, 'message' => 'This is your own group.'];
+        }
+
+        if ($this->alreadyInGroup($group, $member->id)) {
+            return ['success' => false, 'message' => 'You are already in this Equb.'];
+        }
+
+        $existing = $group->invitations()->pending()->where('member_id', $member->id)->first();
+
+        if ($existing) {
+            return [
+                'success' => false,
+                'message' => $existing->is_request
+                    ? 'You have already asked to join. The group creator will respond.'
+                    : 'You already have an invitation to this Equb. Check your invitations.',
+            ];
+        }
+
+        if ($this->remainingCapacity($group) <= 0) {
+            return ['success' => false, 'message' => 'This Equb is already full.'];
+        }
+
+        $invitation = EqubGroupInvitation::create([
+            'equb_group_id' => $group->id,
+            // The requester is both sides of the row: they raised it themselves.
+            'invited_by_member_id' => $member->id,
+            'member_id' => $member->id,
+            'phone' => $member->user?->phone,
+            'status' => EqubInvitationStatus::Pending,
+            'is_request' => true,
+        ]);
+
+        $this->notifyOwnerOfRequest($group, $member);
+
+        return [
+            'success' => true,
+            'message' => 'Request sent. The group creator will approve or decline it.',
+            'invitation' => $invitation,
+        ];
+    }
+
+    /**
+     * Owner approves a join request: the member is enrolled straight away,
+     * because they asked and the owner agreed.
+     */
+    public function approveRequest(EqubGroupInvitation $invitation): array
+    {
+        if (! $invitation->isPending()) {
+            return ['success' => false, 'message' => 'This request is no longer open.'];
+        }
+
+        $group = $invitation->equbGroup;
+        $member = $invitation->member;
+
+        if (! $group || ! $member) {
+            return ['success' => false, 'message' => 'That request is no longer valid.'];
+        }
+
+        if ($this->remainingCapacity($group) <= 0) {
+            return ['success' => false, 'message' => 'This Equb is already full.'];
+        }
+
+        $result = $this->addMembersDirectly($group, [$member->id]);
+
+        $invitation->update([
+            'status' => EqubInvitationStatus::Accepted,
+            'responded_at' => now(),
+        ]);
+
+        return [
+            'success' => true,
+            'message' => ($member->full_name ?? 'The member').' has joined the group.',
+            'added' => $result['added'] ?? 0,
+        ];
+    }
+
+    public function rejectRequest(EqubGroupInvitation $invitation): array
+    {
+        if (! $invitation->isPending()) {
+            return ['success' => false, 'message' => 'This request is no longer open.'];
+        }
+
+        $invitation->update([
+            'status' => EqubInvitationStatus::Declined,
+            'responded_at' => now(),
+        ]);
+
+        $userId = $invitation->member?->user?->id;
+
+        if ($userId) {
+            $this->safely(fn () => $this->fcmService->sendToUser(
+                $userId,
+                [
+                    'type' => 'equb_group_request_declined',
+                    'equb_group_id' => (string) $invitation->equb_group_id,
+                ],
+                'Request declined',
+                'Your request to join "'.($invitation->equbGroup?->name ?? 'the Equb').'" was declined.'
+            ));
+        }
+
+        return ['success' => true, 'message' => 'Request declined.'];
+    }
+
+    protected function notifyOwnerOfRequest(EqubGroup $group, Member $member): void
+    {
+        $ownerUserId = $group->owner?->user?->id;
+
+        if (! $ownerUserId) {
+            return;
+        }
+
+        $this->safely(fn () => $this->fcmService->sendToUser(
+            $ownerUserId,
+            [
+                'type' => 'equb_group_join_request',
+                'equb_group_id' => (string) $group->id,
+                'member_id' => (string) $member->id,
+            ],
+            'Someone wants to join',
+            ($member->full_name ?? 'A member').' asked to join '.$group->name.'.'
+        ));
+    }
+
+    /**
      * @return array{success: bool, message?: string, membership?: EqubMembership}
      */
     public function acceptInvitation(EqubGroupInvitation $invitation, Member $member): array
@@ -323,7 +467,7 @@ class MemberEqubGroupService
 
         $group = $invitation->equbGroup;
 
-        if (! $group || $group->status !== EqubGroupStatus::Registration) {
+        if (! $group || in_array($group->status, [EqubGroupStatus::Completed, EqubGroupStatus::Cancelled], true)) {
             return ['success' => false, 'message' => 'This Equb is no longer accepting members.'];
         }
 
@@ -374,12 +518,21 @@ class MemberEqubGroupService
      */
     public function removeMember(EqubGroup $group, EqubMembership $membership): array
     {
-        if ($group->status !== EqubGroupStatus::Registration) {
-            return ['success' => false, 'message' => 'Members cannot be removed once the Equb has started.'];
-        }
-
         if ($membership->role === EqubMembershipRole::Owner) {
             return ['success' => false, 'message' => 'The group creator cannot be removed.'];
+        }
+
+        // Someone who has already contributed cannot simply be dropped — that
+        // money has to be settled first.
+        $hasPaid = $membership->payments()
+            ->where('status', EqubPaymentStatus::Paid)
+            ->exists();
+
+        if ($hasPaid) {
+            return [
+                'success' => false,
+                'message' => 'This member has already contributed. Ask support to remove them.',
+            ];
         }
 
         return $this->membershipService->leaveEqub($membership);

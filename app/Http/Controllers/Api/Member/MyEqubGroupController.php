@@ -12,6 +12,7 @@ use App\Http\Resources\Api\EqubGroupInvitationResource;
 use App\Http\Resources\Api\GroupDrawResource;
 use App\Http\Resources\Api\MemberEqubGroupResource;
 use App\Models\EqubGroup;
+use App\Models\EqubGroupInvitation;
 use App\Models\EqubMembership;
 use App\Models\Member;
 use App\Services\EqubGroupLedgerService;
@@ -393,6 +394,86 @@ class MyEqubGroupController extends Controller
             'message' => $result['message'],
             'data' => ['reminded' => $result['reminded']],
         ]);
+    }
+
+    /** Ask to join a group using a shared invite code. */
+    public function joinByCode(Request $request): JsonResponse
+    {
+        $request->validate(['invite_code' => ['required', 'string', 'max:12']]);
+
+        $member = $this->member($request);
+
+        if (! $member) {
+            return $this->missingMember();
+        }
+
+        $group = EqubGroup::query()
+            ->where('invite_code', strtoupper(trim($request->input('invite_code'))))
+            ->where('visibility', EqubGroupVisibility::Private)
+            ->with(['owner.user'])
+            ->first();
+
+        if (! $group) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'No Equb found for that code. Check it and try again.',
+            ], 404);
+        }
+
+        $result = $this->groups->requestToJoin($group, $member);
+
+        return response()->json([
+            'status' => $result['success'] ? 'success' : 'error',
+            'message' => $result['message'],
+            'data' => ['equb_group_id' => $group->id, 'name' => $group->name],
+        ], $result['success'] ? 201 : 422);
+    }
+
+    /** Pending join requests for a group the caller owns. */
+    public function joinRequests(Request $request, EqubGroup $equbGroup): JsonResponse
+    {
+        $member = $this->member($request);
+
+        if (! $equbGroup->isOwnedBy($member?->id)) {
+            return $this->forbidden();
+        }
+
+        $requests = $equbGroup->invitations()
+            ->requests()
+            ->pending()
+            ->with(['member.user', 'equbGroup.package'])
+            ->latest()
+            ->get();
+
+        return response()->json([
+            'status' => 'success',
+            'data' => EqubGroupInvitationResource::collection($requests),
+        ]);
+    }
+
+    /** Owner approves or declines a request. */
+    public function respondToRequest(Request $request, EqubGroup $equbGroup, EqubGroupInvitation $invitation): JsonResponse
+    {
+        $member = $this->member($request);
+
+        if (! $equbGroup->isOwnedBy($member?->id)) {
+            return $this->forbidden('Only the group creator can respond to requests.');
+        }
+
+        if ((int) $invitation->equb_group_id !== (int) $equbGroup->id) {
+            return $this->forbidden();
+        }
+
+        $approve = $request->boolean('approve', true);
+
+        $result = $approve
+            ? $this->groups->approveRequest($invitation)
+            : $this->groups->rejectRequest($invitation);
+
+        return response()->json([
+            'status' => $result['success'] ? 'success' : 'error',
+            'message' => $result['message'],
+        ], $result['success'] ? 200 : 422);
     }
 
     /** Look up a private group from a shared invite code. */

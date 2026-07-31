@@ -15,6 +15,7 @@ class EqubGroupInvitation extends Model
         'member_id',
         'phone',
         'status',
+        'is_request',
         'token',
         'message',
         'responded_at',
@@ -25,6 +26,7 @@ class EqubGroupInvitation extends Model
     {
         return [
             'status' => EqubInvitationStatus::class,
+            'is_request' => 'boolean',
             'responded_at' => 'datetime',
             'expires_at' => 'datetime',
         ];
@@ -76,5 +78,17 @@ class EqubGroupInvitation extends Model
             ->where(function ($q) {
                 $q->whereNull('expires_at')->orWhere('expires_at', '>', now());
             });
+    }
+
+    /** Someone asking to join, using an invite code. */
+    public function scopeRequests($query)
+    {
+        return $query->where('is_request', true);
+    }
+
+    /** The owner asking someone to join. */
+    public function scopeInvites($query)
+    {
+        return $query->where('is_request', false);
     }
 }
