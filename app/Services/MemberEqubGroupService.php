@@ -301,7 +301,7 @@ class MemberEqubGroupService
             return;
         }
 
-        $this->fcmService->sendToUser(
+        $this->safely(fn () => $this->fcmService->sendToUser(
             $userId,
             [
                 'type' => 'equb_group_added',
@@ -309,7 +309,7 @@ class MemberEqubGroupService
             ],
             'Added to an Equb group',
             "You are now part of \"{$group->name}\"."
-        );
+        ));
     }
 
     /**
@@ -396,15 +396,25 @@ class MemberEqubGroupService
             return ['success' => false, 'message' => 'This Equb has already started.'];
         }
 
-        if (! $group->isApproved()) {
-            return ['success' => false, 'message' => 'An admin still has to approve this Equb.'];
+        // Only an outright rejection blocks a start. A group still awaiting
+        // review can run: the parent Equb is already vetted, and an admin can
+        // reject it later if something is wrong.
+        if ($group->moderation_status === EqubGroupModerationStatus::Rejected) {
+            return [
+                'success' => false,
+                'message' => $group->rejection_reason ?: 'An admin has rejected this Equb.',
+            ];
         }
 
         $minMembers = (int) config('services.equb.group_min_members', 2);
         $memberCount = $group->activeMemberships()->count();
 
         if ($memberCount < $minMembers) {
-            return ['success' => false, 'message' => "You need at least {$minMembers} members before starting."];
+            return [
+                'success' => false,
+                'message' => "You need at least {$minMembers} members before starting. "
+                    .'Right now there '.($memberCount === 1 ? 'is 1' : "are {$memberCount}").'.',
+            ];
         }
 
         try {
@@ -416,21 +426,22 @@ class MemberEqubGroupService
                 $group->update([
                     'is_locked' => true,
                     'registration_close_at' => now(),
+                    // Approved implicitly by going live.
+                    'moderation_status' => EqubGroupModerationStatus::Approved,
+                    'approved_at' => $group->approved_at ?? now(),
                 ]);
-
-                $this->drawService->buildSplitPlan($group, persist: true);
             });
         } catch (\Throwable $e) {
             Log::error("Failed to start group Equb {$group->id}: ".$e->getMessage());
 
-            return ['success' => false, 'message' => 'Could not start this Equb. Please try again.'];
+            return ['success' => false, 'message' => 'Could not start this Equb: '.$e->getMessage()];
         }
 
         $group->refresh();
         $this->cancelPendingInvitations($group);
         $this->announceStart($group);
 
-        return ['success' => true, 'group' => $group, 'split_plan' => $group->winner_split_plan ?? []];
+        return ['success' => true, 'group' => $group];
     }
 
     /** Owner cancels the group before any money has moved. */
@@ -451,35 +462,37 @@ class MemberEqubGroupService
     }
 
     /**
-     * Nudge everyone who is behind. Throttled per group.
+     * Nudge everyone who is behind.
+     *
+     * Push notification is the default channel: it is free, instant and lands
+     * in the app where they can pay. SMS costs money per message, so it is
+     * opt-in and only the admin panel turns it on.
      *
      * @param  array<int, array<string, mixed>>  $membersBehind  rows from EqubGroupLedgerService
      */
-    public function remindUnpaid(EqubGroup $group, array $membersBehind): array
+    public function remindUnpaid(EqubGroup $group, array $membersBehind, bool $alsoSendSms = false): array
     {
         if ($membersBehind === []) {
             return ['success' => true, 'reminded' => 0, 'message' => 'Everyone is up to date.'];
         }
 
         $reminded = 0;
+        $noDevice = 0;
 
         foreach ($membersBehind as $row) {
             $membership = EqubMembership::with('member.user')->find($row['membership_id']);
-            $phone = $membership?->member?->user?->phone;
+            $user = $membership?->member?->user;
 
-            if (! $phone) {
+            if (! $user) {
                 continue;
             }
 
             $amount = number_format((float) $row['outstanding_now'], 2);
-            $text = "Reminder: your {$group->name} Equb contribution of {$amount} ETB is due. "
-                .'Open the Niya app to pay.';
+            $sent = false;
 
-            $this->smsService->sendSms($phone, $text, null, $membership);
-
-            if ($membership->member?->user?->id) {
-                $this->fcmService->sendToUser(
-                    $membership->member->user->id,
+            if ($user->fcm_token) {
+                $this->safely(fn () => $this->fcmService->sendToUser(
+                    $user->id,
                     [
                         'type' => 'equb_group_payment_reminder',
                         'equb_group_id' => (string) $group->id,
@@ -488,14 +501,53 @@ class MemberEqubGroupService
                     ],
                     'Contribution due',
                     "{$amount} ETB is due for {$group->name}."
-                );
+                ));
+
+                $sent = true;
+            } else {
+                $noDevice++;
             }
 
-            $membership->update(['last_overdue_notified_at' => now()]);
-            $reminded++;
+            // SMS is the admin's paid fallback, never the default.
+            if ($alsoSendSms && $user->phone) {
+                $this->safely(fn () => $this->smsService->sendSms(
+                    $user->phone,
+                    "Reminder: your {$group->name} Equb contribution of {$amount} ETB is due. "
+                    .'Open the Niya app to pay.',
+                    null,
+                    $membership
+                ));
+
+                $sent = true;
+            }
+
+            if ($sent) {
+                $membership->update(['last_overdue_notified_at' => now()]);
+                $reminded++;
+            }
         }
 
-        return ['success' => true, 'reminded' => $reminded, 'message' => "Reminded {$reminded} member(s)."];
+        $message = "Reminded {$reminded} member(s).";
+
+        if ($noDevice > 0 && ! $alsoSendSms) {
+            $message .= " {$noDevice} had no device registered for notifications.";
+        }
+
+        return ['success' => true, 'reminded' => $reminded, 'message' => $message];
+    }
+
+    /**
+     * Notifications must never break the action that triggered them. FCM can be
+     * unconfigured and an SMS gateway can be down; neither should fail a start,
+     * an invite or a join.
+     */
+    protected function safely(callable $callback): void
+    {
+        try {
+            $callback();
+        } catch (\Throwable $e) {
+            Log::warning('Group Equb notification failed: '.$e->getMessage());
+        }
     }
 
     // -----------------------------------------------------------------
@@ -579,7 +631,7 @@ class MemberEqubGroupService
         $token = $member->user?->fcm_token;
 
         if ($token) {
-            $this->fcmService->subscribeToTopic($token, FcmService::equbGroupTopic($group->id));
+            $this->safely(fn () => $this->fcmService->subscribeToTopic($token, FcmService::equbGroupTopic($group->id)));
         }
     }
 
@@ -589,7 +641,7 @@ class MemberEqubGroupService
         $body = "{$inviterName} invited you to join the \"{$group->name}\" Equb.";
 
         if ($invitee?->user?->id) {
-            $this->fcmService->sendToUser(
+            $this->safely(fn () => $this->fcmService->sendToUser(
                 $invitee->user->id,
                 [
                     'type' => 'equb_group_invitation',
@@ -599,16 +651,18 @@ class MemberEqubGroupService
                 ],
                 'Equb invitation',
                 $body
-            );
+            ));
         }
 
-        if ($invitation->phone) {
-            $this->smsService->sendSms(
+        // Only text people who are not on the platform yet; members already got
+        // the push above.
+        if ($invitation->phone && ! $invitee) {
+            $this->safely(fn () => $this->smsService->sendSms(
                 $invitation->phone,
                 $body.' Open the Niya app or use code '.$group->invite_code.' to join.',
                 null,
                 $invitation
-            );
+            ));
         }
     }
 
@@ -620,7 +674,7 @@ class MemberEqubGroupService
             return;
         }
 
-        $this->fcmService->sendToUser(
+        $this->safely(fn () => $this->fcmService->sendToUser(
             $ownerUserId,
             [
                 'type' => 'equb_group_member_joined',
@@ -629,7 +683,7 @@ class MemberEqubGroupService
             ],
             'New member',
             ($member->full_name ?? 'A member')." joined {$group->name}."
-        );
+        ));
     }
 
     protected function cancelPendingInvitations(EqubGroup $group): void
@@ -642,19 +696,14 @@ class MemberEqubGroupService
 
     protected function announceStart(EqubGroup $group): void
     {
-        $plan = implode(' + ', $group->winner_split_plan ?? []);
-
-        $this->fcmService->sendToTopic(
+        $this->safely(fn () => $this->fcmService->sendToTopic(
             FcmService::equbGroupTopic($group->id),
             [
                 'type' => 'equb_group_started',
                 'equb_group_id' => (string) $group->id,
-                'split_plan' => json_encode($group->winner_split_plan ?? []),
             ],
             'Equb started',
-            $plan !== ''
-                ? "{$group->name} has started. Winners per round: {$plan}."
-                : "{$group->name} has started."
-        );
+            "{$group->name} has started."
+        ));
     }
 }

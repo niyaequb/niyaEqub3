@@ -68,8 +68,21 @@ class EqubGroupController extends Controller
      */
     public function show(Request $request, EqubGroup $equbGroup): JsonResponse
     {
+        // Private groups are invisible to outsiders, but a member of one must
+        // still be able to open it — the payment screens load the group here.
         if ($equbGroup->visibility === \App\Enums\EqubGroupVisibility::Private) {
-            return response()->json(['status' => 'error', 'message' => 'Equb group not found.'], 404);
+            $member = $request->user()?->member;
+
+            $belongs = $member && (
+                $equbGroup->isOwnedBy($member->id)
+                || \App\Models\EqubMembership::where('equb_group_id', $equbGroup->id)
+                    ->where('member_id', $member->id)
+                    ->exists()
+            );
+
+            if (! $belongs) {
+                return response()->json(['status' => 'error', 'message' => 'Equb group not found.'], 404);
+            }
         }
 
         $member = $request->user()?->member;

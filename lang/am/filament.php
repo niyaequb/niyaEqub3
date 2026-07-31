@@ -986,6 +986,8 @@ return [
         'members_added' => ':count አባላት ወደ ቡድኑ ተጨምረዋል።',
         'some_members_skipped' => 'አንዳንድ አባላት መጨመር አልተቻሉም',
         'winning_status' => 'የአሸናፊነት ሁኔታ',
+        'also_sms' => 'ኤስኤምኤስም ይላክ',
+        'also_sms_helper' => 'የአፕሊኬሽን ማሳወቂያዎች ነጻ ናቸው። ኤስኤምኤስ ክፍያ ያስክፍላል፣ ስለዚህ አስነባኪ ካልሆነ ይተውት።',
         'won_on' => 'አሸናፊ :date',
         'not_won' => 'አላሸነፈም',
         'filter_won' => 'አሸናፊዎች',

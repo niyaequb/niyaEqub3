@@ -1005,6 +1005,8 @@ return [
         'members_added' => ':count member(s) added to the group.',
         'some_members_skipped' => 'Some members could not be added',
         'winning_status' => 'Winning status',
+        'also_sms' => 'Also send an SMS',
+        'also_sms_helper' => 'Push notifications are free. SMS costs per message, so leave this off unless the reminder is urgent.',
         'won_on' => 'Won :date',
         'not_won' => 'Not won yet',
         'filter_won' => 'Has won',

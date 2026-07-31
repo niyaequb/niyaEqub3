@@ -66,14 +66,21 @@ class GroupLedger extends Page
                 ->icon('heroicon-o-bell-alert')
                 ->color('warning')
                 ->requiresConfirmation()
+                ->schema([
+                    \Filament\Forms\Components\Toggle::make('also_sms')
+                        ->label(__('filament.member_equb_group.also_sms'))
+                        ->helperText(__('filament.member_equb_group.also_sms_helper'))
+                        ->default(false),
+                ])
                 ->visible(fn (): bool => ($this->ledger['group']['members_behind'] ?? 0) > 0)
-                ->action(function (): void {
+                ->action(function (array $data): void {
                     /** @var EqubGroup $group */
                     $group = $this->record;
 
                     $result = app(MemberEqubGroupService::class)->remindUnpaid(
                         $group,
                         app(EqubGroupLedgerService::class)->membersBehind($group),
+                        (bool) ($data['also_sms'] ?? false),
                     );
 
                     Notification::make()->title($result['message'])->success()->send();
