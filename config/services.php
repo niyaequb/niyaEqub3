@@ -44,7 +44,12 @@ return [
         'enforce_draw_schedule' => filter_var(env('EQUB_ENFORCE_DRAW_SCHEDULE', false), FILTER_VALIDATE_BOOLEAN),
 
         // Group Equb: member-created private groups.
-        'group_requires_approval' => filter_var(env('EQUB_GROUP_REQUIRES_APPROVAL', true), FILTER_VALIDATE_BOOLEAN),
+        // Groups go live the moment they are created. Admins review by
+        // exception from the panel instead of gating every single group, which
+        // otherwise left members stuck on "awaiting approval" with no way to
+        // invite anyone. Set EQUB_GROUP_REQUIRES_APPROVAL=true to put the
+        // manual gate back.
+        'group_requires_approval' => filter_var(env('EQUB_GROUP_REQUIRES_APPROVAL', false), FILTER_VALIDATE_BOOLEAN),
         'group_min_members' => (int) env('EQUB_GROUP_MIN_MEMBERS', 2),
         'group_max_members' => (int) env('EQUB_GROUP_MAX_MEMBERS', 100),
         'invitation_ttl_days' => (int) env('EQUB_INVITATION_TTL_DAYS', 14),
