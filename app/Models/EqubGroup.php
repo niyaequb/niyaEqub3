@@ -99,6 +99,21 @@ class EqubGroup extends Model
             if ($group->owner_member_id && empty($group->invite_code)) {
                 $group->invite_code = static::generateInviteCode();
             }
+
+            // Member-created groups are live the moment they exist. There is
+            // no approval queue any more: the parent Equb is already vetted by
+            // an admin and the group inherits its amounts and schedule, so
+            // there is nothing left for a human to sign off.
+            //
+            // This lives on the model rather than in the service so that every
+            // creation path lands the same way — the mobile API, the Filament
+            // "Create Group Equb" button, seeders and tinker — and so that the
+            // database column default can never quietly reintroduce 'pending'.
+            if ($group->owner_member_id
+                && $group->moderation_status !== EqubGroupModerationStatus::Rejected) {
+                $group->moderation_status = EqubGroupModerationStatus::Approved;
+                $group->approved_at = $group->approved_at ?? now();
+            }
         });
     }
 

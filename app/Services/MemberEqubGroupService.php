@@ -67,12 +67,11 @@ class MemberEqubGroupService
             ];
         }
 
-        $needsApproval = (bool) config('services.equb.group_requires_approval', true);
         $frequency = (int) ($parent->contribution_frequency_days ?: 1);
         $package = $parent->package;
 
         try {
-            $group = DB::transaction(function () use ($owner, $parent, $package, $data, $amount, $needsApproval, $frequency) {
+            $group = DB::transaction(function () use ($owner, $parent, $package, $data, $amount, $frequency) {
                 $group = EqubGroup::create([
                     'equb_package_id' => $package?->id,
                     'owner_member_id' => $owner->id,
@@ -80,10 +79,13 @@ class MemberEqubGroupService
                     'name' => $data['name'],
                     'description' => $data['description'] ?? null,
                     'visibility' => EqubGroupVisibility::Private,
-                    'moderation_status' => $needsApproval
-                        ? EqubGroupModerationStatus::Pending
-                        : EqubGroupModerationStatus::Approved,
-                    'approved_at' => $needsApproval ? null : now(),
+                    // Groups are live the moment they are created. There is no
+                    // approval queue: the parent Equb is already vetted by an
+                    // admin, and the group inherits its amounts and schedule,
+                    // so there is nothing left for a human to check. Admins
+                    // review by exception from the panel instead.
+                    'moderation_status' => EqubGroupModerationStatus::Approved,
+                    'approved_at' => now(),
                     'allow_member_invites' => (bool) ($data['allow_member_invites'] ?? false),
                     'fixed_contribution_amount' => $amount,
                     'contribution_frequency_days' => $frequency,
