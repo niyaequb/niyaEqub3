@@ -31,7 +31,15 @@ class AuthController extends Controller
     {
         $result = $this->authService->sendOtp($request->phone);
 
-        return response()->json($result, $result['status'] === 'success' ? 200 : 400);
+        if ($result['status'] === 'success') {
+            return response()->json([
+                'status' => $result['status'],
+                'message' => $result['message'] ?? 'OTP sent successfully',
+                'verificationId' => $result['verificationId'] ?? null,
+            ], 200);
+        }
+
+        return response()->json($result, 400);
     }
 
     public function checkUser(CheckUserRequest $request): JsonResponse
