@@ -27,6 +27,18 @@ class EqubMembershipResource extends JsonResource
             'draw_position' => $this->draw_position,
             'has_won' => $this->has_won,
             'win_date' => $this->win_date?->toIso8601String(),
+            // Whether this membership may be left, and why not if not.
+            //
+            // Computed server-side and sent down rather than re-derived in the
+            // app: the app cannot see the draw tables, and a client that works
+            // the rule out for itself will eventually disagree with the server
+            // — showing a Leave button that then fails is worse than not
+            // showing one. See EqubMembership::exitBlockReason().
+            'can_leave' => $this->canExit(),
+            'exit_block_reason' => $this->exitBlockReason(),
+            'has_received_payout' => $this->hasReceivedPayout(),
+            'total_won_amount' => $this->totalWonAmount(),
+            'is_settled' => $this->isSettled(),
             'status' => $this->status?->value,
             'total_paid' => $this->total_paid,
             'contributed_amount' => $this->total_paid,

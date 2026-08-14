@@ -73,6 +73,90 @@ class EqubMembership extends Model
         return $this->status === EqubMembershipStatus::Active && !$this->has_won;
     }
 
+    // ------------------------------------------------------------------
+    // Exit rules
+    //
+    // An Equb only works because the person who collects the pot in round 1
+    // keeps paying until round N. If they can walk away the moment the money
+    // lands, everyone still waiting for a turn has funded a payout they will
+    // never get back — the circle does not just lose a member, it loses the
+    // money.
+    //
+    // Every exit path funnels through exitBlockReason() so the rule lives in
+    // exactly one place: a member leaving voluntarily, an owner removing
+    // someone, and (with an explicit override) support closing an account.
+    // ------------------------------------------------------------------
+
+    /**
+     * Has this membership already collected a payout?
+     *
+     * Checks three sources rather than trusting the flag alone. `has_won` is
+     * what the draw sets, but it is a denormalised boolean on a mutable row;
+     * the draw tables are the ledger. If any of them says this membership took
+     * money, it took money.
+     */
+    public function hasReceivedPayout(): bool
+    {
+        if ($this->has_won) {
+            return true;
+        }
+
+        // Group Equb: one round can produce several winners.
+        if ($this->drawWins()->exists()) {
+            return true;
+        }
+
+        // Platform Equb: single winner recorded on the draw itself.
+        return $this->winsAsWinner()->exists();
+    }
+
+    /** Total actually awarded to this membership across every round. */
+    public function totalWonAmount(): float
+    {
+        return (float) $this->drawWins()->sum('amount_won');
+    }
+
+    /**
+     * Why this membership cannot leave the Equb, or null if it may.
+     *
+     * Returns a sentence meant to be shown to the person, not an error code —
+     * someone being told they cannot leave deserves to know what they still
+     * owe and why.
+     */
+    public function exitBlockReason(): ?string
+    {
+        if ($this->hasReceivedPayout()) {
+            $outstanding = $this->remaining_amount;
+
+            if ($outstanding > 0) {
+                return 'You have already received your Equb payout, so this Equb cannot be left. '
+                    .number_format($outstanding, 2).' ETB is still owed to the other members.';
+            }
+
+            // Paid up in full. Still not a "leave" — the membership is finished,
+            // and deleting it would erase the draw history that proves the
+            // payout was earned and settled.
+            return 'You have already received your Equb payout. This Equb is complete and stays on your record.';
+        }
+
+        if ($this->payments()->where('status', \App\Enums\EqubPaymentStatus::Paid)->exists()) {
+            return 'You have already made contributions to this Equb. Contact support to arrange a refund before leaving.';
+        }
+
+        return null;
+    }
+
+    public function canExit(): bool
+    {
+        return $this->exitBlockReason() === null;
+    }
+
+    /** Won, and paid every round owed. Nothing outstanding. */
+    public function isSettled(): bool
+    {
+        return $this->hasReceivedPayout() && $this->remaining_amount <= 0;
+    }
+
     public function getTotalPaidAttribute(): float
     {
         return (float) $this->payments()->where('status', \App\Enums\EqubPaymentStatus::Paid)->sum('amount');

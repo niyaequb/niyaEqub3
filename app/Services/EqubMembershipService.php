@@ -223,37 +223,74 @@ class EqubMembershipService
     }
 
     /**
-     * Allow a member to leave an Equb group if no payments have been made.
+     * Let a member leave an Equb.
+     *
+     * REFUSED OUTRIGHT ONCE THEY HAVE WON. This used to check only whether any
+     * payment had been marked Paid, which left the worst case wide open: a
+     * member who wins the very first round before their own contribution has
+     * been reconciled had no Paid row, passed the check, and could leave
+     * holding the entire pot. The other members had funded a payout for
+     * someone who was no longer in the circle.
+     *
+     * The authoritative rule now lives on the model — see
+     * EqubMembership::exitBlockReason() — so this path, the owner's remove
+     * button and any future one cannot drift apart.
+     *
+     * @param  bool  $force  Support override. Only ever passed by an
+     *                       authenticated admin who has settled the debt by
+     *                       other means; never reachable from the member API.
      */
-    public function leaveEqub(EqubMembership $membership): array
+    public function leaveEqub(EqubMembership $membership, bool $force = false): array
     {
-        // Check if there are any 'paid' payments
-        $hasPaid = $membership->payments()->where('status', \App\Enums\EqubPaymentStatus::Paid)->exists();
-
-        if ($hasPaid) {
-            return ['success' => false, 'message' => 'You cannot leave this Equb because you have already made payments.'];
-        }
-
+        // Re-read inside the transaction rather than trusting the instance the
+        // caller handed over. A draw running concurrently sets has_won on a
+        // different copy of this row, and a stale in-memory model would sail
+        // past the guard.
         try {
-            DB::transaction(function () use ($membership) {
-                $group = $membership->equbGroup;
+            return DB::transaction(function () use ($membership, $force) {
+                /** @var EqubMembership|null $fresh */
+                $fresh = EqubMembership::whereKey($membership->getKey())->lockForUpdate()->first();
 
-                // Delete all payments (including pending ones)
-                $membership->payments()->delete();
+                if (! $fresh) {
+                    return ['success' => false, 'message' => 'That membership no longer exists.'];
+                }
 
-                // Delete the membership
-                $membership->delete();
+                $blocked = $fresh->exitBlockReason();
 
-                // Decrement group member count
-                if ($group) {
+                if ($blocked !== null && ! $force) {
+                    return ['success' => false, 'message' => $blocked];
+                }
+
+                if ($blocked !== null && $force) {
+                    Log::warning('Equb exit forced by override', [
+                        'membership_id' => $fresh->id,
+                        'equb_group_id' => $fresh->equb_group_id,
+                        'member_id' => $fresh->member_id,
+                        'reason_overridden' => $blocked,
+                        'has_received_payout' => $fresh->hasReceivedPayout(),
+                        'remaining_amount' => $fresh->remaining_amount,
+                    ]);
+                }
+
+                $group = $fresh->equbGroup;
+
+                // Only ever a hard delete for a membership with no history: no
+                // payout, no contributions. Anything with a win attached is
+                // withdrawn through the admin path instead, which preserves the
+                // row so the draw records it points at stay readable.
+                $fresh->payments()->delete();
+                $fresh->delete();
+
+                if ($group && $group->current_members_count > 0) {
                     $group->decrement('current_members_count');
                 }
-            });
 
-            return ['success' => true, 'message' => 'You have successfully left the Equb.'];
+                return ['success' => true, 'message' => 'You have successfully left the Equb.'];
+            });
         } catch (\Throwable $e) {
-            Log::error("Failed to leave Equb for membership #{$membership->id}: " . $e->getMessage());
-            return ['success' => false, 'message' => 'Failed to leave Equb: ' . $e->getMessage()];
+            Log::error("Failed to leave Equb for membership #{$membership->id}: ".$e->getMessage());
+
+            return ['success' => false, 'message' => 'Could not leave this Equb. Please try again.'];
         }
     }
 }

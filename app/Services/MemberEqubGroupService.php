@@ -525,7 +525,16 @@ class MemberEqubGroupService
     }
 
     /**
-     * Owner removes someone before the Equb starts.
+     * Owner removes someone from the group.
+     *
+     * A winner cannot be removed. Otherwise the remove button would be a way
+     * around the leave rule: the winner asks the owner to drop them, the debt
+     * disappears with the membership row, and the rest of the circle absorbs
+     * the loss. The owner is not entitled to forgive money that belongs to the
+     * other members.
+     *
+     * Same guard as the member's own leave path, deliberately — see
+     * EqubMembership::exitBlockReason().
      */
     public function removeMember(EqubGroup $group, EqubMembership $membership): array
     {
@@ -533,8 +542,23 @@ class MemberEqubGroupService
             return ['success' => false, 'message' => 'The group creator cannot be removed.'];
         }
 
-        // Someone who has already contributed cannot simply be dropped — that
-        // money has to be settled first.
+        if ($membership->hasReceivedPayout()) {
+            $outstanding = $membership->remaining_amount;
+            $name = $membership->member?->full_name ?? 'This member';
+
+            return [
+                'success' => false,
+                'message' => $outstanding > 0
+                    ? "{$name} has already received their payout and still owes "
+                        .number_format($outstanding, 2).' ETB to the group. '
+                        .'They cannot be removed until it is settled — contact support if there is a dispute.'
+                    : "{$name} has already received their payout and has paid in full. "
+                        .'Their record stays with the group.',
+            ];
+        }
+
+        // Someone who has contributed but not yet won cannot simply be dropped
+        // either — that money has to be settled first.
         $hasPaid = $membership->payments()
             ->where('status', EqubPaymentStatus::Paid)
             ->exists();
@@ -611,6 +635,17 @@ class MemberEqubGroupService
     /** Owner cancels the group before any money has moved. */
     public function cancel(EqubGroup $group): array
     {
+        // A group that has run a draw has already paid someone. Cancelling it
+        // would release every remaining debt at once — the same hole as letting
+        // a single winner leave, applied to the whole circle.
+        if ($group->draws()->exists()) {
+            return [
+                'success' => false,
+                'message' => 'A draw has already been held in this Equb, so it cannot be cancelled. '
+                    .'Contact support to close it properly.',
+            ];
+        }
+
         $hasPaid = EqubMembership::where('equb_group_id', $group->id)
             ->whereHas('payments', fn ($q) => $q->where('status', EqubPaymentStatus::Paid))
             ->exists();
