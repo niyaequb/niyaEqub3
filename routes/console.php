@@ -23,3 +23,11 @@ Schedule::command('app:check-completed-memberships')
 Schedule::command('equb:check-missed-payments')
     ->dailyAt('10:00')
     ->withoutOverlapping();
+
+// Report printing is checked every minute rather than at fixed times: each
+// schedule carries its own run_at, so the command decides what is due. Nothing
+// happens on a tick with no due schedules beyond one indexed query.
+Schedule::command('reports:run-scheduled-prints')
+    ->everyMinute()
+    ->withoutOverlapping()
+    ->runInBackground();

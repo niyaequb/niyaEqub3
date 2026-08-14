@@ -1,0 +1,81 @@
+<?php
+
+namespace App\Filament\Widgets\Reports;
+
+use Filament\Support\RawJs;
+
+/**
+ * Split of settled money across Chapa, offline and manual collection.
+ *
+ * Shows collected rather than gross: a failed Chapa attempt is not revenue,
+ * and counting it would flatter the online channel against cash.
+ */
+class PaymentMethodChart extends ReportChartWidget
+{
+    protected int|string|array $columnSpan = 1;
+
+    protected ?string $maxHeight = '240px';
+
+    public function getHeading(): ?string
+    {
+        return __('filament.equb_report.by_method');
+    }
+
+    protected function getType(): string
+    {
+        return 'doughnut';
+    }
+
+    protected function getData(): array
+    {
+        // Methods with nothing behind them are dropped: an empty slice adds a
+        // legend entry and no information.
+        $rows = collect($this->report()['by_method'])->filter(fn ($r) => $r['collected'] > 0)->values();
+
+        if ($rows->isEmpty()) {
+            return [
+                'datasets' => [[
+                    'data' => [1],
+                    'backgroundColor' => ['#e5e7eb'],
+                    'borderWidth' => 0,
+                ]],
+                'labels' => [__('filament.equb_report.no_data')],
+            ];
+        }
+
+        return [
+            'datasets' => [[
+                'data' => $rows->pluck('collected')->all(),
+                'backgroundColor' => array_slice(self::PALETTE, 0, $rows->count()),
+                'borderWidth' => 0,
+                'hoverOffset' => 6,
+            ]],
+            'labels' => $rows->map(fn ($r) => $r['label'].' ('.$r['transactions'].')')->all(),
+        ];
+    }
+
+    protected function getOptions(): RawJs
+    {
+        return RawJs::make(<<<'JS'
+            {
+                maintainAspectRatio: false,
+                cutout: '58%',
+                plugins: {
+                    legend: { position: 'bottom', labels: { boxWidth: 10, usePointStyle: true, padding: 12 } },
+                    tooltip: {
+                        callbacks: {
+                            label: function (context) {
+                                var value = context.parsed || 0;
+                                var total = context.dataset.data.reduce(function (a, b) { return a + b; }, 0);
+                                var share = total > 0 ? ((value / total) * 100).toFixed(1) : '0.0';
+                                return context.label + ': ' +
+                                    Number(value).toLocaleString('en-US', { minimumFractionDigits: 2 }) +
+                                    ' ETB (' + share + '%)';
+                            }
+                        }
+                    }
+                }
+            }
+        JS);
+    }
+}

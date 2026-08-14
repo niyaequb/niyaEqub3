@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\Session;
 
 use App\Http\Controllers\Api\Member\EqubPaymentController as MemberEqubPaymentController;
 use App\Http\Controllers\LegalController;
+use App\Http\Controllers\ReportPrintController;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
 
 Route::get('/', function () {
@@ -45,3 +46,24 @@ Route::get('/admin/locale/{locale}', function ($locale) {
 Route::post('/payment/chapa/webhook', [MemberEqubPaymentController::class, 'webhook'])
     ->withoutMiddleware([VerifyCsrfToken::class])
     ->name('payment.chapa.webhook');
+
+/*
+|--------------------------------------------------------------------------
+| Equb report printing
+|--------------------------------------------------------------------------
+|
+| Both routes serve report documents containing member names, phone numbers
+| and payment amounts, so both sit behind `auth` and re-check the same
+| permission the report page uses. A print job URL is not a share link.
+|
+*/
+Route::middleware(['web', 'auth'])->prefix('admin')->group(function () {
+    // Print-ready HTML for the browser print dialog. Filters arrive as query
+    // parameters so the printed copy matches whatever the admin was looking at.
+    Route::get('/equb-reports/print', ReportPrintController::class)
+        ->name('admin.equb-reports.print');
+
+    // Serves a rendered print job to the print agent's iframe.
+    Route::get('/print-jobs/{job}/content', [ReportPrintController::class, 'jobContent'])
+        ->name('admin.print-jobs.content');
+});
