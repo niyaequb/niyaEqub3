@@ -26,7 +26,10 @@ class EqubGroupLedgerService
         $frequency = max(1, (int) $group->contribution_frequency_days);
 
         $memberships = $group->memberships()
-            ->with(['member.user:id,phone,name,profile_picture'])
+            // sponsor.user is loaded alongside member.user because a
+            // "My Responsibility People" seat has no member behind it: the
+            // sponsor is where its name, contact and money all come from.
+            ->with(['member.user:id,phone,name,profile_picture', 'sponsor.user:id,phone,name'])
             ->withSum(['payments as paid_total' => fn ($q) => $q->where('status', EqubPaymentStatus::Paid)], 'amount')
             ->withCount(['payments as paid_rounds' => fn ($q) => $q->where('status', EqubPaymentStatus::Paid)])
             ->withCount(['payments as pending_rounds' => fn ($q) => $q->where('status', EqubPaymentStatus::Pending)])
@@ -39,6 +42,7 @@ class EqubGroupLedgerService
         $groupDueSoFar = 0.0;
         $paidUpCount = 0;
         $behindCount = 0;
+        $seatCount = 0;
 
         foreach ($memberships as $membership) {
             $paidRounds = (int) $membership->paid_rounds;
@@ -62,13 +66,36 @@ class EqubGroupLedgerService
                 $overdueRounds > 0 ? $behindCount++ : $paidUpCount++;
             }
 
+            $isSeat = $membership->isResponsibilitySeat();
+
+            if ($isSeat) {
+                $seatCount++;
+            }
+
             $rows[] = [
                 'membership_id' => $membership->id,
                 'member_id' => $membership->member_id,
-                'name' => $membership->member?->full_name ?? $membership->member?->user?->name,
-                'phone' => $membership->member?->user?->phone,
-                'profile_picture_url' => $membership->member?->user?->profile_picture_url,
+                'name' => $isSeat
+                    ? $membership->displayName()
+                    : ($membership->member?->full_name ?? $membership->member?->user?->name),
+                'phone' => $isSeat
+                    ? $membership->responsibility_phone
+                    : $membership->member?->user?->phone,
+                'profile_picture_url' => $isSeat ? null : $membership->member?->user?->profile_picture_url,
                 'role' => $this->roleValue($membership->role),
+
+                // --- My Responsibility People -------------------------
+                // A seat is counted like any other member above; these
+                // fields only say who is answerable for it, so the app can
+                // show "paid by Bilal" and put the pay button in front of
+                // the right person.
+                'is_responsibility_seat' => $isSeat,
+                'sponsor_member_id' => $membership->sponsor_member_id,
+                'sponsor_name' => $isSeat
+                    ? ($membership->sponsor?->full_name ?? $membership->sponsor?->user?->name)
+                    : null,
+                'relation' => $membership->responsibility_relation,
+                'payer_member_id' => $membership->payerMemberId(),
                 'joined_at' => $membership->join_date?->toIso8601String(),
                 'rounds_total' => $totalRounds,
                 'rounds_due' => $dueRounds,
@@ -93,9 +120,29 @@ class EqubGroupLedgerService
         }
 
         // Owner first, then the members who are behind, then everybody else.
-        usort($rows, function (array $a, array $b): int {
-            return [$a['role'] === 'owner' ? 0 : 1, $a['rounds_overdue'] > 0 ? 0 : 1, $a['name'] ?? '']
-                <=> [$b['role'] === 'owner' ? 0 : 1, $b['rounds_overdue'] > 0 ? 0 : 1, $b['name'] ?? ''];
+        //
+        // Within a bucket rows are keyed on who pays rather than on the row's
+        // own name, so the people a sponsor is responsible for sit directly
+        // under the sponsor instead of scattering alphabetically across the
+        // list. Their own name is the last tiebreaker.
+        $payerKey = fn (array $r): string => (string) ($r['is_responsibility_seat']
+            ? ($r['sponsor_name'] ?? '')
+            : ($r['name'] ?? ''));
+
+        usort($rows, function (array $a, array $b) use ($payerKey): int {
+            return [
+                $a['role'] === 'owner' ? 0 : 1,
+                $a['rounds_overdue'] > 0 ? 0 : 1,
+                $payerKey($a),
+                $a['is_responsibility_seat'] ? 1 : 0,
+                $a['name'] ?? '',
+            ] <=> [
+                $b['role'] === 'owner' ? 0 : 1,
+                $b['rounds_overdue'] > 0 ? 0 : 1,
+                $payerKey($b),
+                $b['is_responsibility_seat'] ? 1 : 0,
+                $b['name'] ?? '',
+            ];
         });
 
         return [
@@ -118,6 +165,10 @@ class EqubGroupLedgerService
                 'progress' => $groupExpected > 0 ? round(min(1, $groupPaid / $groupExpected), 4) : 0,
                 'members_paid_up' => $paidUpCount,
                 'members_behind' => $behindCount,
+                // Of members_count, how many are places held on someone
+                // else's behalf. members_count already includes them; this is
+                // the breakdown, not an addition to it.
+                'responsibility_seats_count' => $seatCount,
                 'currency' => 'ETB',
             ],
             'members' => $rows,

@@ -16,6 +16,19 @@ class StoreMemberEqubGroupRequest extends FormRequest
      * it. The contribution comes from the parent's package and the winner rules
      * belong to the admin panel, so neither is accepted here.
      *
+     * Two different kinds of people can be added, and the difference is who
+     * pays:
+     *
+     *   invite_member_ids / invite_phones
+     *       Niya members (or numbers that will become members). They are
+     *       invited, they accept, and each one pays their own contributions.
+     *
+     *   responsibility_people
+     *       Places held for someone with no Niya account — a child, a parent,
+     *       a neighbour. Nobody is invited and nobody accepts, because the
+     *       creator is taking the obligation on themselves. Each one still
+     *       counts as a member of the circle.
+     *
      * @return array<string, mixed>
      */
     public function rules(): array
@@ -30,6 +43,15 @@ class StoreMemberEqubGroupRequest extends FormRequest
             'invite_member_ids.*' => ['integer', 'exists:members,id'],
             'invite_phones' => ['nullable', 'array', 'max:100'],
             'invite_phones.*' => ['string', 'max:20'],
+
+            // The array cap is deliberately low and the service applies the
+            // real per-sponsor limit on top of it: every entry here is a
+            // contribution the creator alone will owe, every single round.
+            'responsibility_people' => ['nullable', 'array', 'max:20'],
+            'responsibility_people.*.name' => ['required', 'string', 'min:2', 'max:120'],
+            'responsibility_people.*.phone' => ['nullable', 'string', 'max:20'],
+            'responsibility_people.*.relation' => ['nullable', 'string', 'max:40'],
+            'responsibility_people.*.note' => ['nullable', 'string', 'max:200'],
         ];
     }
 
@@ -41,6 +63,7 @@ class StoreMemberEqubGroupRequest extends FormRequest
         return [
             'parent_equb_group_id.required' => 'Choose which Equb this group is joining.',
             'name.required' => 'Give your group a name.',
+            'responsibility_people.*.name.required' => 'Every person you are responsible for needs a name.',
         ];
     }
 }

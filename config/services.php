@@ -53,6 +53,12 @@ return [
         'group_min_members' => (int) env('EQUB_GROUP_MIN_MEMBERS', 2),
         'group_max_members' => (int) env('EQUB_GROUP_MAX_MEMBERS', 100),
         'invitation_ttl_days' => (int) env('EQUB_INVITATION_TTL_DAYS', 14),
+
+        // "My Responsibility People": how many places one member may hold on
+        // behalf of others in a single group. Each one is a full contribution
+        // every round, paid by the sponsor alone, so the cap exists to stop
+        // someone quietly taking on more than they can carry.
+        'max_responsibility_people' => (int) env('EQUB_MAX_RESPONSIBILITY_PEOPLE', 10),
     ],
 
     'fcm' => [

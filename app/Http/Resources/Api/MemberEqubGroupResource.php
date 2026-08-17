@@ -36,6 +36,20 @@ class MemberEqubGroupResource extends JsonResource
 
             'max_members' => $this->max_members,
             'current_members_count' => (int) $this->current_members_count,
+
+            // --- My Responsibility People ----------------------------
+            // Both counts are already inside current_members_count — a place
+            // held for someone else is a member of the circle in every way
+            // that matters to the money. These are the breakdown, so the app
+            // can say "5 members, 2 of them yours to pay for".
+            'responsibility_seats_count' => $this->responsibility_seats_count !== null
+                ? (int) $this->responsibility_seats_count
+                : null,
+            'my_responsibility_seats_count' => $this->my_responsibility_seats_count !== null
+                ? (int) $this->my_responsibility_seats_count
+                : null,
+            'responsibility_seat_limit' => (int) config('services.equb.max_responsibility_people', 10),
+
             'rounds_total' => $this->totalRounds(),
             'rounds_completed' => $this->draws_count ?? $this->draws()->count(),
             'pot_per_round' => round($this->potPerRound(), 2),

@@ -24,8 +24,20 @@ class EqubMembershipController extends Controller
         }
 
         $query = EqubMembership::query()
-            ->where('member_id', $member->id)
-            ->with(['equbGroup.package', 'member.user', 'payments', 'winsAsWinner']);
+            ->with(['equbGroup.package', 'member.user', 'sponsor.user', 'payments', 'winsAsWinner']);
+
+        // Default: only the member's own memberships, so "My Equbs" keeps
+        // meaning the Equbs they are personally in. Pass
+        // include_responsibility=1 to also get the places they hold for other
+        // people, which they owe contributions on — the group screen uses this
+        // to list everything the member has to pay in one go.
+        if ($request->boolean('include_responsibility')) {
+            $query->where(fn ($q) => $q
+                ->where('member_id', $member->id)
+                ->orWhere('sponsor_member_id', $member->id));
+        } else {
+            $query->where('member_id', $member->id);
+        }
 
         if ($request->filled('status')) {
             $query->where('status', $request->input('status'));
@@ -54,11 +66,13 @@ class EqubMembershipController extends Controller
         if (! $member) {
             return response()->json(['status' => 'error', 'message' => 'Member profile not found.'], 404);
         }
-        if ((int) $equbMembership->member_id !== (int) $member->id) {
+        // isPayableBy() lets a sponsor open a place they are responsible for.
+        // They are the one paying it, so they need to be able to see it.
+        if (! $equbMembership->isPayableBy($member->id)) {
             return response()->json(['status' => 'error', 'message' => 'Forbidden.'], 403);
         }
 
-        $equbMembership->load(['equbGroup.package', 'member.user', 'payments']);
+        $equbMembership->load(['equbGroup.package', 'member.user', 'sponsor.user', 'payments']);
 
         return response()->json([
             'status' => 'success',
@@ -111,8 +125,18 @@ class EqubMembershipController extends Controller
         }
 
         // Authorize: membership must belong to the current authenticated member
+        //
+        // Deliberately member_id and not isPayableBy(): a place held for
+        // someone else is not "left", it is removed by the sponsor through
+        // the group's responsibility endpoint, which carries the right
+        // permission checks and the right wording.
         if ((int) $equbMembership->member_id !== (int) $member->id) {
-            return response()->json(['status' => 'error', 'message' => 'Forbidden.'], 403);
+            return response()->json([
+                'status' => 'error',
+                'message' => $equbMembership->isResponsibilitySeat()
+                    ? 'Remove this person from the Equb group instead.'
+                    : 'Forbidden.',
+            ], 403);
         }
 
         $service = app(EqubMembershipService::class);

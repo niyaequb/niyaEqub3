@@ -150,7 +150,11 @@ class GroupDrawService
                     $group->increment('split_plan_cursor');
                 }
 
-                return $draw->load(['winners.membership.member.user', 'equbGroup']);
+                return $draw->load([
+                    'winners.membership.member.user',
+                    'winners.membership.sponsor.user',
+                    'equbGroup',
+                ]);
             });
         } catch (\Throwable $e) {
             Log::error("Group draw failed for group {$group->id}: ".$e->getMessage());
@@ -171,7 +175,11 @@ class GroupDrawService
             'winners' => $winners->map(fn (EqubMembership $m): array => [
                 'membership_id' => $m->id,
                 'member_id' => $m->member_id,
-                'name' => $m->member?->full_name,
+                'name' => $m->displayName(),
+                // A place held for someone else wins on its own merit; the
+                // money goes to the sponsor who has been paying for it.
+                'is_responsibility_seat' => $m->isResponsibilitySeat(),
+                'paid_out_to_member_id' => $m->payerMemberId(),
             ])->all(),
         ];
     }
@@ -183,7 +191,10 @@ class GroupDrawService
     public function eligibleMemberships(EqubGroup $group): Collection
     {
         $memberships = EqubMembership::query()
-            ->with(['cohort', 'member.user'])
+            // sponsor.user rides along because a responsibility seat is drawn
+            // like any other member but has no account of its own to name or
+            // notify — the sponsor stands in for both.
+            ->with(['cohort', 'member.user', 'sponsor.user'])
             ->where('equb_group_id', $group->id)
             ->where('status', EqubMembershipStatus::Active)
             ->where('has_won', false)
@@ -263,7 +274,7 @@ class GroupDrawService
     protected function announceDrawStarted(EqubGroup $group, int $winnersCount, int $round): void
     {
         $candidates = $this->eligibleMemberships($group)
-            ->map(fn (EqubMembership $m): string => (string) ($m->member?->full_name ?? str_pad((string) $m->member_id, 3, '0', STR_PAD_LEFT)))
+            ->map(fn (EqubMembership $m): string => $m->displayName())
             ->values()
             ->all();
 
@@ -292,7 +303,7 @@ class GroupDrawService
     protected function announceDrawCompleted(EqubGroup $group, EqubDraw $draw): void
     {
         $names = $draw->winners
-            ->map(fn (EqubDrawWinner $w): string => (string) ($w->membership?->member?->full_name ?? 'Member'))
+            ->map(fn (EqubDrawWinner $w): string => (string) ($w->membership?->displayName() ?? 'Member'))
             ->values()
             ->all();
 
@@ -315,16 +326,32 @@ class GroupDrawService
     protected function notifyWinners(EqubGroup $group, EqubDraw $draw, float $amountPerWinner): void
     {
         foreach ($draw->winners as $winnerRow) {
-            $phone = $winnerRow->membership?->member?->user?->phone;
+            $membership = $winnerRow->membership;
+
+            if (! $membership) {
+                continue;
+            }
+
+            // The payout follows the money: whoever has been paying the
+            // contributions on this place is the one told it has won and the
+            // one it is settled with. For a responsibility seat that is the
+            // sponsor, who is also the only person with a phone to text.
+            $phone = $membership->payerUser()?->phone;
 
             if (! $phone) {
                 continue;
             }
 
             $amount = number_format($amountPerWinner, 2);
-            $message = "Congratulations! You are in the winning group for {$group->name} "
-                ."(round {$draw->round_number}). Your share is {$amount} ETB. "
-                .'Draw date: '.$draw->draw_date->format('Y-m-d').'.';
+            $date = $draw->draw_date->format('Y-m-d');
+
+            $message = $membership->isResponsibilitySeat()
+                ? "Congratulations! {$membership->displayName()}, who you are responsible for in {$group->name}, "
+                    ."is in the winning group (round {$draw->round_number}). The share of {$amount} ETB is paid to you. "
+                    ."Draw date: {$date}."
+                : "Congratulations! You are in the winning group for {$group->name} "
+                    ."(round {$draw->round_number}). Your share is {$amount} ETB. "
+                    ."Draw date: {$date}.";
 
             $this->smsService->sendSms($phone, $message, null, $draw);
         }

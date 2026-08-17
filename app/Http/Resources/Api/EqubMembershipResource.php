@@ -18,7 +18,21 @@ class EqubMembershipResource extends JsonResource
             'equb_package_name' => $this->equbGroup?->package?->name,
             'equb_group_id' => $this->equb_group_id,
             'member_id' => $this->member_id,
-            'contribution_amount' => $this->equbGroup->fixed_contribution_amount,
+
+            // --- My Responsibility People ----------------------------
+            // A place held for someone with no Niya account. member_id is
+            // null on these and every obligation belongs to the sponsor, so
+            // the name and the payer are stated explicitly rather than left
+            // for the client to infer from a missing member.
+            'is_responsibility_seat' => $this->isResponsibilitySeat(),
+            'display_name' => $this->displayName(),
+            'sponsor_member_id' => $this->sponsor_member_id,
+            'sponsor_name' => $this->sponsor?->full_name ?? $this->sponsor?->user?->name,
+            'responsibility_phone' => $this->responsibility_phone,
+            'responsibility_relation' => $this->responsibility_relation,
+            'payer_member_id' => $this->payerMemberId(),
+
+            'contribution_amount' => $this->equbGroup?->fixed_contribution_amount,
             'contribution_frequency_days' => $this->equbGroup?->contribution_frequency_days,
             'join_date' => $this->join_date?->toIso8601String(),
             'next_draw_date' => $this->next_draw_date?->toIso8601String(),
@@ -48,7 +62,9 @@ class EqubMembershipResource extends JsonResource
             // 'equb_group' => new EqubGroupResource($this->whenLoaded('equbGroup')),
             'equb_group_name'=> $this->equbGroup?->name,
             'equb_group_package_name' => $this->equbGroup?->package?->name,
-            'member' => new MemberResource($this->whenLoaded('member')),
+            // A responsibility seat has no member row, so this stays null
+            // instead of serialising an empty resource shell.
+            'member' => $this->member ? new MemberResource($this->member) : null,
                     'payments' => EqubPaymentResource::collection(
                         $this->whenLoaded('payments', function () {
                             return $this->payments->where('status', 'paid');

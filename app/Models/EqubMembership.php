@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\Log;
 
 class EqubMembership extends Model
 {
-    protected $fillable = ['equb_group_id', 'member_id', 'role', 'invited_by_member_id', 'cohort_id', 'contribution_amount', 'contribution_frequency_days', 'join_date', 'calculated_end_date', 'draw_position', 'has_won', 'win_date', 'status', 'last_overdue_notified_at'];
+    protected $fillable = ['equb_group_id', 'member_id', 'role', 'invited_by_member_id', 'cohort_id', 'contribution_amount', 'contribution_frequency_days', 'join_date', 'calculated_end_date', 'draw_position', 'has_won', 'win_date', 'status', 'last_overdue_notified_at', 'sponsor_member_id', 'responsibility_name', 'responsibility_phone', 'responsibility_relation', 'responsibility_note'];
 
     protected function casts(): array
     {
@@ -34,6 +34,18 @@ class EqubMembership extends Model
     public function member(): BelongsTo
     {
         return $this->belongsTo(Member::class);
+    }
+
+    /**
+     * The member answerable for a "My Responsibility People" seat.
+     *
+     * Set only on responsibility seats — a normal membership answers for
+     * itself, and this stays null there rather than pointing back at the same
+     * member twice.
+     */
+    public function sponsor(): BelongsTo
+    {
+        return $this->belongsTo(Member::class, 'sponsor_member_id');
     }
 
     public function cohort(): BelongsTo
@@ -71,6 +83,88 @@ class EqubMembership extends Model
     public function isEligibleForDraw(): bool
     {
         return $this->status === EqubMembershipStatus::Active && !$this->has_won;
+    }
+
+    // ------------------------------------------------------------------
+    // My Responsibility People
+    //
+    // A seat held for someone with no Niya account: a child, an elderly
+    // parent, a neighbour without a phone. It is a full membership — it pays
+    // in every round and it can be drawn — but there is nobody behind it to
+    // pay, to notify or to hand a payout to. The sponsor does all three.
+    //
+    // member_id is the discriminator rather than a separate flag column,
+    // because the two can then never disagree: a seat with no account has no
+    // member_id, and that is the same fact stated once.
+    // ------------------------------------------------------------------
+
+    public function isResponsibilitySeat(): bool
+    {
+        return $this->member_id === null;
+    }
+
+    /** Seats held on someone else's behalf. */
+    public function scopeResponsibilitySeats($query)
+    {
+        return $query->whereNull('member_id');
+    }
+
+    /** Memberships belonging to a real Niya account. */
+    public function scopeRealMembers($query)
+    {
+        return $query->whereNotNull('member_id');
+    }
+
+    public function scopeSponsoredBy($query, int $memberId)
+    {
+        return $query->where('sponsor_member_id', $memberId);
+    }
+
+    /**
+     * Who owes the money on this seat, and who receives its payout.
+     *
+     * Every financial question about a membership goes through here rather
+     * than reading member_id directly, so a responsibility seat cannot end up
+     * with an obligation nobody is attached to.
+     */
+    public function payerMemberId(): ?int
+    {
+        return $this->member_id ?? $this->sponsor_member_id;
+    }
+
+    public function payerMember(): ?Member
+    {
+        return $this->member ?? $this->sponsor;
+    }
+
+    /** The account that gets the push notification or SMS for this seat. */
+    public function payerUser(): ?User
+    {
+        return $this->payerMember()?->user;
+    }
+
+    /**
+     * The name to show wherever a member name would appear.
+     *
+     * A responsibility seat shows the name the sponsor typed in, never the
+     * sponsor's own — the point of the feature is that the circle can see who
+     * each seat is for.
+     */
+    public function displayName(): string
+    {
+        if ($this->isResponsibilitySeat()) {
+            return trim((string) $this->responsibility_name) ?: 'Responsibility seat';
+        }
+
+        return (string) ($this->member?->full_name
+            ?? $this->member?->user?->name
+            ?? 'Member');
+    }
+
+    /** True when [$memberId] is the person answerable for this seat. */
+    public function isPayableBy(?int $memberId): bool
+    {
+        return $memberId !== null && (int) $this->payerMemberId() === (int) $memberId;
     }
 
     // ------------------------------------------------------------------

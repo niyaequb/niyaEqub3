@@ -525,12 +525,18 @@ class ChapaService
         }
 
         $membership = $payment->membership;
-        $member = $membership?->member;
-        $user = $member?->user;
-        $name = $member?->full_name ?? 'Member';
+
+        // The billing identity is whoever is actually paying. On a place held
+        // for someone with no Niya account ("My Responsibility People") that
+        // is the sponsor — the seat itself has no member and no email, which
+        // would otherwise send Chapa a nameless customer.
+        $payer = $membership?->payerMember();
+        $user = $payer?->user;
+        $name = $payer?->full_name ?? 'Member';
         $nameParts = explode(' ', $name, 2);
         $firstName = $nameParts[0];
         $lastName = $nameParts[1] ?? '';
+        $isSeat = (bool) $membership?->isResponsibilitySeat();
 
         $webhookUrl = route('payment.chapa.webhook');
         $returnUrl = config('app.url').'/admin/equb-payments?chapa_return='.$payment->reference;
@@ -546,12 +552,16 @@ class ChapaService
             'return_url' => $returnUrl,
             'customization' => [
                 'title' => 'Equb Payment',
-                'description' => 'Equb contribution payment',
+                'description' => $isSeat
+                    ? 'Equb contribution for '.$membership->displayName()
+                    : 'Equb contribution payment',
             ],
             'meta' => [
                 'equb_payment_id' => $payment->id,
                 'equb_membership_id' => $payment->equb_membership_id,
                 'type' => 'EqubPayment',
+                'paid_by_member_id' => $payer?->id,
+                'is_responsibility_seat' => $isSeat,
             ],
         ];
 
@@ -628,9 +638,17 @@ class ChapaService
                         app(\App\Services\EqubMembershipService::class)->completeIfEligible($payment->membership);
                     }
 
+                    // payerUser() is the member on a normal membership and
+                    // the sponsor on a place held for someone else, so the
+                    // receipt reaches the person whose money it was.
+                    $membership = $payment->membership;
+                    $seatName = $membership?->isResponsibilitySeat()
+                        ? ' for '.$membership->displayName()
+                        : '';
+
                     app(\App\Services\SmsService::class)->sendSms(
-                        $payment->membership?->member?->user?->phone ?? '',
-                        'Your Equb payment of '.$payment->amount.' ETB has been received successfully.',
+                        $membership?->payerUser()?->phone ?? '',
+                        'Your Equb payment of '.$payment->amount.' ETB'.$seatName.' has been received successfully.',
                         null,
                         $payment
                     );

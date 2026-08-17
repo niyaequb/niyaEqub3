@@ -154,6 +154,14 @@ Route::middleware(['jwt.auth', 'active.user'])->group(function () {
             Route::get('{equbGroup}/requests', [MyEqubGroupController::class, 'joinRequests']);
             Route::post('{equbGroup}/requests/{invitation}', [MyEqubGroupController::class, 'respondToRequest']);
 
+            // "My Responsibility People": places in the circle held for
+            // someone with no Niya account. Registered above the {equbGroup}
+            // catch-all show route for the same reason as the others here.
+            Route::get('{equbGroup}/responsibility-people', [MyEqubGroupController::class, 'responsibilityPeople']);
+            Route::post('{equbGroup}/responsibility-people', [MyEqubGroupController::class, 'addResponsibilityPerson']);
+            Route::patch('{equbGroup}/responsibility-people/{equbMembership}', [MyEqubGroupController::class, 'updateResponsibilityPerson']);
+            Route::delete('{equbGroup}/responsibility-people/{equbMembership}', [MyEqubGroupController::class, 'removeResponsibilityPerson']);
+
             Route::get('{equbGroup}', [MyEqubGroupController::class, 'show']);
             Route::get('{equbGroup}/ledger', [MyEqubGroupController::class, 'ledger']);
             Route::get('{equbGroup}/invitations', [MyEqubGroupController::class, 'invitations']);

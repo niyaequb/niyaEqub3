@@ -7,9 +7,12 @@ use App\Enums\EqubGroupVisibility;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\Member\InviteEqubGroupMembersRequest;
 use App\Http\Requests\Api\Member\RunGroupDrawRequest;
+use App\Http\Requests\Api\Member\StoreGroupResponsibilityRequest;
 use App\Http\Requests\Api\Member\StoreMemberEqubGroupRequest;
+use App\Http\Requests\Api\Member\UpdateGroupResponsibilityRequest;
 use App\Http\Resources\Api\EqubGroupInvitationResource;
 use App\Http\Resources\Api\GroupDrawResource;
+use App\Http\Resources\Api\GroupResponsibilityResource;
 use App\Http\Resources\Api\MemberEqubGroupResource;
 use App\Models\EqubGroup;
 use App\Models\EqubGroupInvitation;
@@ -17,6 +20,7 @@ use App\Models\EqubMembership;
 use App\Models\Member;
 use App\Services\EqubGroupLedgerService;
 use App\Services\GroupDrawService;
+use App\Services\GroupResponsibilityService;
 use App\Services\MemberEqubGroupService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -32,6 +36,7 @@ class MyEqubGroupController extends Controller
         protected MemberEqubGroupService $groups,
         protected EqubGroupLedgerService $ledger,
         protected GroupDrawService $draws,
+        protected GroupResponsibilityService $responsibility,
     ) {}
 
     /**
@@ -89,7 +94,15 @@ class MyEqubGroupController extends Controller
                 'owner.user',
                 'memberships' => fn ($q) => $q->where('member_id', $member->id)->with(['payments', 'winsAsWinner']),
             ])
-            ->withCount('draws');
+            ->withCount([
+                'draws',
+                // Counted here rather than looked up per group in the resource,
+                // which would be one query per card on the list screen.
+                'memberships as responsibility_seats_count' => fn ($q) => $q->whereNull('member_id'),
+                'memberships as my_responsibility_seats_count' => fn ($q) => $q
+                    ->whereNull('member_id')
+                    ->where('sponsor_member_id', $member->id),
+            ]);
 
         if ($request->filled('status')) {
             $query->where('status', $request->input('status'));
@@ -137,12 +150,135 @@ class MyEqubGroupController extends Controller
             $request->input('invite_phones', []),
         );
 
+        // "My Responsibility People" added on the same screen. These are not
+        // invitations — nobody has to accept, because the creator is taking the
+        // contributions on themselves — so they become members of the circle
+        // here and now.
+        $seats = $this->responsibility->addMany(
+            $group,
+            $member,
+            $request->input('responsibility_people', []),
+        );
+
+        // The head-count changed underneath the group, so re-read it rather
+        // than serialising the stale copy the service returned.
+        $group->refresh();
+
         return response()->json([
             'status' => 'success',
             'message' => 'Your Equb group is ready. Invite your members to get started.',
             'data' => new MemberEqubGroupResource($group->load(['package', 'owner.user'])),
             'invitations' => ['sent' => $invited['invited'], 'skipped' => $invited['skipped']],
+            'responsibility_people' => ['added' => $seats['added'], 'skipped' => $seats['skipped']],
         ], 201);
+    }
+
+    // -----------------------------------------------------------------
+    // My Responsibility People
+    //
+    // Places in the circle held for someone with no Niya account. Each counts
+    // as a member; every contribution on it belongs to the sponsor who added
+    // it. See GroupResponsibilityService.
+    // -----------------------------------------------------------------
+
+    /**
+     * The people being carried in this group.
+     *
+     * The creator sees the whole circle's seats, because they are answerable
+     * for the group's collection rate. Everyone else sees only their own — who
+     * else's child is in the Equb is not their business.
+     */
+    public function responsibilityPeople(Request $request, EqubGroup $equbGroup): JsonResponse
+    {
+        $member = $this->member($request);
+
+        if (! $this->canView($equbGroup, $member)) {
+            return $this->forbidden();
+        }
+
+        $seats = $this->responsibility->forGroup(
+            $equbGroup,
+            $member,
+            $request->boolean('mine_only'),
+        );
+
+        return response()->json([
+            'status' => 'success',
+            'data' => GroupResponsibilityResource::collection($seats),
+            'meta' => [
+                'my_count' => $member ? $this->responsibility->countFor($equbGroup, $member) : 0,
+                'limit_per_member' => $this->responsibility->seatLimit(),
+                'can_add' => $this->responsibility->canManage($equbGroup, $member),
+            ],
+        ]);
+    }
+
+    public function addResponsibilityPerson(StoreGroupResponsibilityRequest $request, EqubGroup $equbGroup): JsonResponse
+    {
+        $member = $this->member($request);
+
+        if (! $member) {
+            return $this->missingMember();
+        }
+
+        $result = $this->responsibility->add($equbGroup, $member, $request->validated());
+
+        if (! $result['success']) {
+            return response()->json(['status' => 'error', 'message' => $result['message']], 422);
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'message' => $result['message'],
+            'data' => new GroupResponsibilityResource($result['membership']),
+        ], 201);
+    }
+
+    public function updateResponsibilityPerson(
+        UpdateGroupResponsibilityRequest $request,
+        EqubGroup $equbGroup,
+        EqubMembership $equbMembership,
+    ): JsonResponse {
+        $member = $this->member($request);
+
+        if ((int) $equbMembership->equb_group_id !== (int) $equbGroup->id) {
+            return $this->forbidden();
+        }
+
+        if (! $this->responsibility->canManageSeat($equbGroup, $equbMembership, $member)) {
+            return $this->forbidden('Only the person responsible for them can change their details.');
+        }
+
+        $result = $this->responsibility->update($equbMembership, $request->validated());
+
+        if (! $result['success']) {
+            return response()->json(['status' => 'error', 'message' => $result['message']], 422);
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'message' => $result['message'],
+            'data' => new GroupResponsibilityResource($result['membership']),
+        ]);
+    }
+
+    public function removeResponsibilityPerson(
+        Request $request,
+        EqubGroup $equbGroup,
+        EqubMembership $equbMembership,
+    ): JsonResponse {
+        $member = $this->member($request);
+
+        if (! $member) {
+            return $this->missingMember();
+        }
+
+        $result = $this->responsibility->remove($equbGroup, $equbMembership, $member);
+
+        return response()->json([
+            'status' => $result['success'] ? 'success' : 'error',
+            'message' => $result['message'],
+        ], $result['success'] ? 200 : 422);
     }
 
     public function show(Request $request, EqubGroup $equbGroup): JsonResponse
@@ -157,7 +293,13 @@ class MyEqubGroupController extends Controller
             'package',
             'owner.user',
             'memberships' => fn ($q) => $q->where('member_id', $member->id)->with(['payments', 'winsAsWinner']),
-        ])->loadCount('draws');
+        ])->loadCount([
+            'draws',
+            'memberships as responsibility_seats_count' => fn ($q) => $q->whereNull('member_id'),
+            'memberships as my_responsibility_seats_count' => fn ($q) => $q
+                ->whereNull('member_id')
+                ->where('sponsor_member_id', $member->id),
+        ]);
 
         return response()->json([
             'status' => 'success',
@@ -320,7 +462,16 @@ class MyEqubGroupController extends Controller
         }
 
         $draws = $equbGroup->draws()
-            ->with(['winners.membership.member.user', 'winnerMembership.member', 'equbGroup'])
+            // sponsor.user is loaded next to member.user so a winning place
+            // held for someone else can be named and credited to the member
+            // who has been paying for it.
+            ->with([
+                'winners.membership.member.user',
+                'winners.membership.sponsor.user',
+                'winnerMembership.member',
+                'winnerMembership.sponsor',
+                'equbGroup',
+            ])
             ->orderByDesc('draw_date')
             ->get();
 

@@ -544,7 +544,9 @@ class MemberEqubGroupService
 
         if ($membership->hasReceivedPayout()) {
             $outstanding = $membership->remaining_amount;
-            $name = $membership->member?->full_name ?? 'This member';
+            // displayName() covers responsibility seats too, which have no
+            // member row to read a name from.
+            $name = $membership->displayName();
 
             return [
                 'success' => false,
@@ -679,14 +681,27 @@ class MemberEqubGroupService
         $noDevice = 0;
 
         foreach ($membersBehind as $row) {
-            $membership = EqubMembership::with('member.user')->find($row['membership_id']);
-            $user = $membership?->member?->user;
+            // sponsor.user matters here: a "My Responsibility People" seat has
+            // no member behind it, so reading member.user alone skipped every
+            // overdue seat in silence and nobody was ever chased for them.
+            $membership = EqubMembership::with(['member.user', 'sponsor.user'])->find($row['membership_id']);
+            $user = $membership?->payerUser();
 
             if (! $user) {
                 continue;
             }
 
             $amount = number_format((float) $row['outstanding_now'], 2);
+            $isSeat = $membership->isResponsibilitySeat();
+            $seatName = $membership->displayName();
+
+            // The sponsor may be carrying several places, so the reminder has
+            // to say which one it is about — "1,889 ETB is due" three times
+            // over is unreadable.
+            $pushBody = $isSeat
+                ? "{$amount} ETB is due for {$seatName} in {$group->name}."
+                : "{$amount} ETB is due for {$group->name}.";
+
             $sent = false;
 
             if ($user->fcm_token) {
@@ -697,9 +712,11 @@ class MemberEqubGroupService
                         'equb_group_id' => (string) $group->id,
                         'equb_membership_id' => (string) $membership->id,
                         'amount_due' => (string) $row['outstanding_now'],
+                        'is_responsibility_seat' => $isSeat ? '1' : '0',
+                        'seat_name' => $seatName,
                     ],
                     'Contribution due',
-                    "{$amount} ETB is due for {$group->name}."
+                    $pushBody
                 ));
 
                 $sent = true;
@@ -709,10 +726,15 @@ class MemberEqubGroupService
 
             // SMS is the admin's paid fallback, never the default.
             if ($alsoSendSms && $user->phone) {
+                $smsBody = $isSeat
+                    ? "Reminder: the {$group->name} Equb contribution of {$amount} ETB for {$seatName}, "
+                        .'who you are responsible for, is due. Open the Niya app to pay.'
+                    : "Reminder: your {$group->name} Equb contribution of {$amount} ETB is due. "
+                        .'Open the Niya app to pay.';
+
                 $this->safely(fn () => $this->smsService->sendSms(
                     $user->phone,
-                    "Reminder: your {$group->name} Equb contribution of {$amount} ETB is due. "
-                    .'Open the Niya app to pay.',
+                    $smsBody,
                     null,
                     $membership
                 ));

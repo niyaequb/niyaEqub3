@@ -26,9 +26,15 @@ class EqubPaymentController extends Controller
             return response()->json(['status' => 'error', 'message' => 'Member profile not found.'], 404);
         }
 
+        // A member's payments are their own plus the ones on places they hold
+        // for someone else in a Group Equb. A responsibility seat has no
+        // member_id, so filtering on that alone hid every contribution the
+        // sponsor had actually made.
         $query = EqubPayment::query()
-            ->whereHas('membership', fn ($q) => $q->where('member_id', $member->id))
-            ->with(['membership.member.user', 'membership.equbGroup.package']);
+            ->whereHas('membership', fn ($q) => $q
+                ->where('member_id', $member->id)
+                ->orWhere('sponsor_member_id', $member->id))
+            ->with(['membership.member.user', 'membership.sponsor.user', 'membership.equbGroup.package']);
 
         if ($request->filled('equb_membership_id')) {
             $query->where('equb_membership_id', $request->input('equb_membership_id'));
@@ -60,11 +66,14 @@ class EqubPaymentController extends Controller
         if (! $member) {
             return response()->json(['status' => 'error', 'message' => 'Member profile not found.'], 404);
         }
-        if ((int) $equbPayment->membership?->member_id !== (int) $member->id) {
+        // isPayableBy() resolves to the member on a normal membership and to
+        // the sponsor on a place held for someone else, so both can read their
+        // own receipts and neither can read anybody else's.
+        if (! $equbPayment->membership?->isPayableBy($member->id)) {
             return response()->json(['status' => 'error', 'message' => 'Forbidden.'], 403);
         }
 
-        $equbPayment->load(['membership.member.user', 'membership.equbGroup.package']);
+        $equbPayment->load(['membership.member.user', 'membership.sponsor.user', 'membership.equbGroup.package']);
 
         return response()->json([
             'status' => 'success',
@@ -106,9 +115,14 @@ class EqubPaymentController extends Controller
             return response()->json(['status' => 'error', 'message' => 'Member profile not found.'], 404);
         }
 
+        // Either their own membership, or a place they are responsible for.
+        // The second case is the whole point of "My Responsibility People":
+        // the seat has nobody behind it to pay, so the sponsor pays it.
         $membership = EqubMembership::query()
             ->where('id', $request->input('equb_membership_id'))
-            ->where('member_id', $member->id)
+            ->where(fn ($q) => $q
+                ->where('member_id', $member->id)
+                ->orWhere('sponsor_member_id', $member->id))
             ->first();
 
         if (! $membership) {
@@ -159,16 +173,28 @@ class EqubPaymentController extends Controller
         return response()->json([
             'status' => 'success',
             'message' => 'Payment recorded. It may require admin approval.',
-            'data' => new EqubPaymentResource($payment->load(['membership.member.user', 'membership.equbGroup.package'])),
+            'data' => new EqubPaymentResource($payment->load(['membership.member.user', 'membership.sponsor.user', 'membership.equbGroup.package'])),
         ], 201);
     }
 
     protected function sendPaymentSuccessNotification(EqubPayment $payment): void
     {
-        $phone = $payment->membership?->member?->user?->phone;
-        if ($phone) {
-            $message = 'Your Equb payment of '.$payment->amount.' ETB has been received successfully.';
-            app(SmsService::class)->sendSms($phone, $message, null, $payment);
+        $membership = $payment->membership;
+
+        // The receipt goes to whoever paid. On a place held for someone else
+        // that is the sponsor, who is also the only one of the two with a
+        // phone number to text.
+        $phone = $membership?->payerUser()?->phone;
+
+        if (! $phone) {
+            return;
         }
+
+        $message = $membership->isResponsibilitySeat()
+            ? 'Your Equb payment of '.$payment->amount.' ETB for '.$membership->displayName()
+                .' has been received successfully.'
+            : 'Your Equb payment of '.$payment->amount.' ETB has been received successfully.';
+
+        app(SmsService::class)->sendSms($phone, $message, null, $payment);
     }
 }

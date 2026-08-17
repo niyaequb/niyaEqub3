@@ -88,20 +88,7 @@ class EqubMembershipService
 
         $joinDate = now();
         $calculatedEndDate = $this->calculateEndDate($group, $joinDate, $frequency);
-
-        // Find or create cohort for the given month/year
-        $cohort = Cohort::firstOrCreate(
-            [
-                'equb_group_id' => $group->id,
-                'month' => $joinDate->month,
-                'year' => $joinDate->year,
-            ],
-            [
-                'name' => $joinDate->format('F Y'),
-                'win_weight' => 1.00, // Default weight
-                'is_active' => true,
-            ]
-        );
+        $cohort = $this->resolveCohort($group, $joinDate);
 
         try {
             $membership = DB::transaction(function () use ($group, $memberId, $amount, $frequency, $joinDate, $calculatedEndDate, $cohort) {
@@ -125,6 +112,96 @@ class EqubMembershipService
         } catch (\Throwable $e) {
             return ['success' => false, 'message' => 'Failed to join Equb: '.$e->getMessage()];
         }
+    }
+
+    /**
+     * Open a seat in a group for someone who has no Niya account.
+     *
+     * Identical to joinEqub in every respect that touches money: same
+     * contribution, same frequency, same cohort weighting, same end date, and
+     * it bumps the same head-count. The only difference is that member_id is
+     * left null and a sponsor is recorded instead, because there is no account
+     * to attach the obligation to.
+     *
+     * Deliberately not routed through joinEqub: that method's guards are all
+     * about the member joining ("already in this group", "member not found"),
+     * and none of them mean anything for a seat with no account behind it.
+     *
+     * @return array{success: bool, membership?: EqubMembership, message?: string}
+     */
+    public function createResponsibilitySeat(EqubGroup $group, Member $sponsor, array $person): array
+    {
+        $name = trim((string) ($person['name'] ?? ''));
+
+        if ($name === '') {
+            return ['success' => false, 'message' => 'Give this person a name.'];
+        }
+
+        if (in_array($group->status, [EqubGroupStatus::Completed, EqubGroupStatus::Cancelled], true)) {
+            return ['success' => false, 'message' => 'This Equb is closed.'];
+        }
+
+        $amount = (float) $group->fixed_contribution_amount;
+        $frequency = (int) $group->contribution_frequency_days;
+
+        if ($amount <= 0 || $frequency <= 0) {
+            return ['success' => false, 'message' => 'Invalid contribution settings on this Equb.'];
+        }
+
+        $joinDate = now();
+        $cohort = $this->resolveCohort($group, $joinDate);
+
+        try {
+            $membership = DB::transaction(function () use ($group, $sponsor, $person, $name, $amount, $frequency, $joinDate, $cohort) {
+                $membership = EqubMembership::create([
+                    'equb_group_id' => $group->id,
+                    'member_id' => null,
+                    'sponsor_member_id' => $sponsor->id,
+                    'responsibility_name' => $name,
+                    'responsibility_phone' => $person['phone'] ?? null,
+                    'responsibility_relation' => $person['relation'] ?? null,
+                    'responsibility_note' => $person['note'] ?? null,
+                    'role' => \App\Enums\EqubMembershipRole::Member,
+                    'cohort_id' => $cohort->id,
+                    'contribution_amount' => $amount,
+                    'contribution_frequency_days' => $frequency,
+                    'join_date' => $joinDate,
+                    'calculated_end_date' => $this->calculateEndDate($group, $joinDate, $frequency),
+                    'status' => EqubMembershipStatus::Active,
+                ]);
+
+                $group->increment('current_members_count');
+
+                return $membership->load(['equbGroup.package', 'sponsor.user']);
+            });
+
+            return ['success' => true, 'membership' => $membership];
+        } catch (\Throwable $e) {
+            Log::error('Failed to open a responsibility seat: '.$e->getMessage());
+
+            return ['success' => false, 'message' => 'Could not add '.$name.' to this Equb.'];
+        }
+    }
+
+    /**
+     * The month/year cohort a seat joins into. Shared by real members and
+     * responsibility seats so late joiners of both kinds keep the same
+     * win-weight compensation.
+     */
+    protected function resolveCohort(EqubGroup $group, Carbon $joinDate): Cohort
+    {
+        return Cohort::firstOrCreate(
+            [
+                'equb_group_id' => $group->id,
+                'month' => $joinDate->month,
+                'year' => $joinDate->year,
+            ],
+            [
+                'name' => $joinDate->format('F Y'),
+                'win_weight' => 1.00, // Default weight
+                'is_active' => true,
+            ]
+        );
     }
 
     protected function calculateEndDate(EqubGroup $group, Carbon $joinDate, int $frequencyDays, ?int $memberCount = null): ?Carbon
@@ -201,13 +278,20 @@ class EqubMembershipService
 
     protected function sendCompletionNotification(EqubMembership $membership): void
     {
-        $member = $membership->member;
-        $user = $member->user;
+        // A responsibility seat has no account behind it, so the sponsor is
+        // the one told about it. payerMember() resolves to the member on a
+        // normal membership and to the sponsor on a seat, which is why this
+        // never reads member->user directly — that was a fatal null access the
+        // moment a seat completed.
+        $user = $membership->payerUser();
         $phone = $user?->phone;
         $groupName = $membership->equbGroup?->name ?? 'Niya Equb';
 
-        $message = "Congratulations! Your journey with {$groupName} is fully completed. ";
-        $message .= "You have paid all contributions and received your win amount. Thank you for using Niya Equb!";
+        $message = $membership->isResponsibilitySeat()
+            ? "Congratulations! The place you hold for {$membership->displayName()} in {$groupName} is fully completed. "
+                .'All contributions are paid and the win amount has been received. Thank you for using Niya Equb!'
+            : "Congratulations! Your journey with {$groupName} is fully completed. "
+                .'You have paid all contributions and received your win amount. Thank you for using Niya Equb!';
 
         if ($phone) {
             $this->smsService->sendSms($phone, $message, null, null);
@@ -218,6 +302,8 @@ class EqubMembershipService
                 'type' => 'equb_membership_completed',
                 'equb_membership_id' => (string) $membership->id,
                 'equb_group_name' => $groupName,
+                'is_responsibility_seat' => $membership->isResponsibilitySeat() ? '1' : '0',
+                'seat_name' => $membership->displayName(),
             ], "Ekub Completed!", "Your {$groupName} journey is successfully finished.");
         }
     }
