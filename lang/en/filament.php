@@ -982,7 +982,7 @@ return [
         'no_eligible' => 'Nobody in this group is eligible yet. Members need at least one paid contribution, and must be up to date if the group requires it.',
         'pick_at_least_one' => 'Select at least one member to win.',
         'platform_group' => 'Platform group',
-        'parent_group' => 'Which Equb is this group joining?',
+        'parent_group' => 'Which Equb is this group joining???',
         'parent_group_helper' => 'The contribution per person, the frequency and the schedule all come from this Equb.',
         'add_members' => 'Add members',
         'add_members_helper' => 'Start typing a name or phone number. Each person gets an invitation and joins once they accept.',
