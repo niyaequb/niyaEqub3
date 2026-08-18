@@ -23,6 +23,7 @@ use App\Http\Controllers\Api\Member\EqubMembershipController as MemberEqubMember
 use App\Http\Controllers\Api\Member\EqubPackageController as MemberEqubPackageController;
 use App\Http\Controllers\Api\Member\EqubPaymentController as MemberEqubPaymentController;
 use App\Http\Controllers\Api\Member\PaymentController;
+use App\Http\Controllers\Api\ServiceController;
 use App\Http\Controllers\Api\UserController;
 use Illuminate\Support\Facades\Route;
 
@@ -37,6 +38,12 @@ use Illuminate\Support\Facades\Route;
 | be assigned to the "api" middleware group.
 |
 */
+
+// Service index and health check. Registered first so that the base URL and
+// the monitoring probe resolve before any prefixed group is considered.
+// Without the index, GET /api returns a 404 page and reads as an outage.
+Route::get('/', [ServiceController::class, 'index']);
+Route::get('health', [ServiceController::class, 'health']);
 
 // Public authentication routes
 Route::prefix('auth')->group(function () {
