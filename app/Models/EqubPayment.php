@@ -18,6 +18,9 @@ class EqubPayment extends Model
         'payment_method',
         'status',
         'reference',
+        // Shared by every contribution settled in one gateway transaction.
+        // See the add_batch_reference migration.
+        'batch_reference',
     ];
 
     protected function casts(): array
@@ -54,6 +57,23 @@ class EqubPayment extends Model
     public function membership(): BelongsTo
     {
         return $this->belongsTo(EqubMembership::class, 'equb_membership_id');
+    }
+
+    /**
+     * The other contributions settled by the same gateway transaction.
+     *
+     * Empty for an ordinary single payment. Populated when a member paid for
+     * their own place and the places they hold for other people in one go.
+     */
+    public function batchSiblings()
+    {
+        if (blank($this->batch_reference)) {
+            return static::query()->whereRaw('1 = 0');
+        }
+
+        return static::query()
+            ->where('batch_reference', $this->batch_reference)
+            ->whereKeyNot($this->getKey());
     }
 
     public function isPending(): bool

@@ -187,7 +187,11 @@ class GroupEqubLotteryService
                     ]);
                 }
 
-                return $draw->load(['winners.membership.member.user', 'equbGroup']);
+                return $draw->load([
+                    'winners.membership.member.user',
+                    'winners.membership.sponsor.user',
+                    'equbGroup',
+                ]);
             });
         } catch (\Throwable $e) {
             Log::error("Group Equb lottery failed on parent {$parent->id}: ".$e->getMessage(), [
@@ -265,8 +269,6 @@ class GroupEqubLotteryService
 
     protected function notifyWinners(Collection $winners, EqubGroup $parent, EqubDraw $draw, float $perPerson): void
     {
-        $amount = number_format($perPerson, 2);
-
         foreach ($winners as $group) {
             $this->safely(fn () => $this->fcmService->sendToTopic(
                 FcmService::equbGroupTopic($group->id),
@@ -279,17 +281,42 @@ class GroupEqubLotteryService
                 "{$group->name} has won round {$draw->round_number} of {$parent->name}."
             ));
 
+            // One message per person, not per place.
+            //
+            // A member holding three "My Responsibility People" places would
+            // otherwise get three identical texts saying "your share is X" —
+            // confusing to read, wrong about the amount, and billed three
+            // times. Grouping by the payer means each person gets one message
+            // stating what they are actually owed.
+            $shares = [];
+
             foreach ($group->activeMemberships as $membership) {
-                $phone = $membership->member?->user?->phone;
+                $user = $membership->payerUser();
+                $phone = $user?->phone;
 
                 if (! $phone) {
                     continue;
                 }
 
+                $shares[$phone] ??= ['places' => 0, 'held' => []];
+                $shares[$phone]['places']++;
+
+                if ($membership->isResponsibilitySeat()) {
+                    $shares[$phone]['held'][] = $membership->displayName();
+                }
+            }
+
+            foreach ($shares as $phone => $share) {
+                $total = number_format($perPerson * $share['places'], 2);
+
+                $heldNote = $share['held'] !== []
+                    ? ' This includes the place(s) you hold for '.implode(', ', $share['held']).'.'
+                    : '';
+
                 $this->safely(fn () => $this->smsService->sendSms(
                     $phone,
                     "Congratulations! Your group \"{$group->name}\" has won round {$draw->round_number} "
-                    ."of {$parent->name}. Your share is {$amount} ETB.",
+                    ."of {$parent->name}. Your share is {$total} ETB.".$heldNote,
                     null,
                     $draw
                 ));

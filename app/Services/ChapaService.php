@@ -597,6 +597,94 @@ class ChapaService
     }
 
     /**
+     * Initialize one Chapa transaction covering several Equb contributions.
+     *
+     * Used when a member settles their own place and the places they hold for
+     * "My Responsibility People" together. Each contribution keeps its own
+     * equb_payments row; they share $batchReference, which is what Chapa is
+     * given as tx_ref and what the webhook resolves them by.
+     *
+     * @param  array<int, EqubPayment>  $payments
+     */
+    public function initializeEqubBatchPayment(
+        array $payments,
+        string $batchReference,
+        float $total,
+        $payer,
+        string $context = 'frontend',
+    ): array {
+        $secretKey = $this->envService->get('CHAPA_SECRET_KEY');
+        if (! $secretKey) {
+            throw new \Exception('Chapa secret key not configured. Please configure it in Settings.');
+        }
+
+        $user = $payer?->user;
+        $name = $payer?->full_name ?? 'Member';
+        $nameParts = explode(' ', $name, 2);
+        $firstName = $nameParts[0];
+        $lastName = $nameParts[1] ?? '';
+
+        $count = count($payments);
+
+        $webhookUrl = route('payment.chapa.webhook');
+        $returnUrl = config('app.url').'/admin/equb-payments?chapa_return='.$batchReference;
+
+        $payload = [
+            'amount' => $total,
+            'currency' => 'ETB',
+            'email' => $user?->email ?? 'member@equb.com',
+            'first_name' => $firstName,
+            'last_name' => $lastName,
+            'tx_ref' => $batchReference,
+            'callback_url' => $webhookUrl,
+            'return_url' => $returnUrl,
+            'customization' => [
+                'title' => 'Equb Payment',
+                'description' => $count > 1
+                    ? "Equb contributions ({$count} places)"
+                    : 'Equb contribution payment',
+            ],
+            'meta' => [
+                'type' => 'EqubPaymentBatch',
+                'batch_reference' => $batchReference,
+                'equb_payment_ids' => implode(',', array_map(fn (EqubPayment $p): int => $p->id, $payments)),
+                'paid_by_member_id' => $payer?->id,
+                'contributions' => $count,
+            ],
+        ];
+
+        try {
+            $response = Http::withHeaders([
+                'Authorization' => 'Bearer '.$secretKey,
+                'Content-Type' => 'application/json',
+            ])->post('https://api.chapa.co/v1/transaction/initialize', $payload);
+
+            $data = $response->json();
+
+            if ($response->successful() && isset($data['status']) && $data['status'] === 'success') {
+                return [
+                    'success' => true,
+                    'checkout_url' => $data['data']['checkout_url'],
+                    'reference' => $batchReference,
+                ];
+            }
+
+            Log::info('Chapa Equb batch initialization failed', ['data' => $data]);
+
+            return [
+                'success' => false,
+                'message' => $data['message'] ?? 'Failed to initialize payment',
+            ];
+        } catch (\Exception $e) {
+            Log::error('Chapa Equb batch payment initialization failed', [
+                'batch_reference' => $batchReference,
+                'error' => $e->getMessage(),
+            ]);
+            throw $e;
+        }
+    }
+
+    /**
      * Handle Chapa webhook for Equb payment
      */
     public function handleWebhookForEqubPayment(array $payload, ?string $signature = null): array
@@ -618,54 +706,140 @@ class ChapaService
             return ['success' => false, 'message' => 'Reference not found in webhook'];
         }
 
-        $payment = EqubPayment::where('reference', $reference)->first();
-        if (! $payment) {
+        // One reference can stand for one contribution or for a whole batch.
+        //
+        // A member holding places for other people settles the round in a
+        // single charge; every equb_payments row in that charge carries the
+        // same batch_reference. Resolving by reference first keeps the old
+        // single-payment path byte-for-byte identical.
+        $payments = EqubPayment::where('reference', $reference)->get();
+
+        if ($payments->isEmpty()) {
+            $payments = EqubPayment::where('batch_reference', $reference)->get();
+        }
+
+        if ($payments->isEmpty()) {
             Log::error('Chapa webhook: Equb payment not found', ['reference' => $reference]);
 
             return ['success' => false, 'message' => 'Equb payment not found'];
         }
-                Log::info('pAYLOAD'.json_encode($payload));
 
+        Log::info('Chapa Equb webhook payload: '.json_encode($payload));
 
-        if($payload['event'] === 'charge.success'){
+        if (($payload['event'] ?? null) === 'charge.success') {
             $verification = $this->verifyPayment($reference);
+
             if ($verification['success']) {
-                if ($payment->isPending()) {
-                    $payment->markAsPaid();
-                    
-                    // Check for individual completion
-                    if ($payment->membership) {
-                        app(\App\Services\EqubMembershipService::class)->completeIfEligible($payment->membership);
+                // Every contribution in the charge settles together. Marking
+                // only one would leave the member's own place paid and the
+                // places they pay for still showing as owed, after they had
+                // already been charged for all of them.
+                foreach ($payments as $payment) {
+                    if (! $payment->isPending()) {
+                        continue;
                     }
 
-                    // payerUser() is the member on a normal membership and
-                    // the sponsor on a place held for someone else, so the
-                    // receipt reaches the person whose money it was.
+                    $payment->markAsPaid();
+
                     $membership = $payment->membership;
-                    $seatName = $membership?->isResponsibilitySeat()
-                        ? ' for '.$membership->displayName()
-                        : '';
 
-                    app(\App\Services\SmsService::class)->sendSms(
-                        $membership?->payerUser()?->phone ?? '',
-                        'Your Equb payment of '.$payment->amount.' ETB'.$seatName.' has been received successfully.',
-                        null,
-                        $payment
-                    );
+                    if ($membership) {
+                        app(\App\Services\EqubMembershipService::class)->completeIfEligible($membership);
+                    }
                 }
-                Log::info('Chapa Equb webhook processed successfully', ['equb_payment_id' => $payment->id]);
 
-                return ['success' => true, 'payment' => $payment, 'message' => 'Equb payment verified and processed'];
+                $this->announceEqubPaymentSettled($payments, $reference);
+
+                Log::info('Chapa Equb webhook processed successfully', [
+                    'reference' => $reference,
+                    'payments' => $payments->pluck('id')->all(),
+                ]);
+
+                return [
+                    'success' => true,
+                    'payment' => $payments->first(),
+                    'payments' => $payments,
+                    'message' => 'Equb payment verified and processed',
+                ];
             }
 
+            foreach ($payments as $payment) {
+                if ($payment->isPending()) {
+                    $payment->markAsFailed();
+                }
+            }
+
+            Log::warning('Chapa Equb webhook verification failed', [
+                'reference' => $reference,
+                'payments' => $payments->pluck('id')->all(),
+            ]);
+
+            return ['success' => false, 'message' => $verification['message']];
         }
 
-
-        if ($payment->isPending()) {
-            $payment->markAsFailed();
+        foreach ($payments as $payment) {
+            if ($payment->isPending()) {
+                $payment->markAsFailed();
+            }
         }
-        Log::warning('Chapa Equb webhook verification failed', ['equb_payment_id' => $payment->id]);
 
-        return ['success' => false, 'message' => $verification['message']];
+        Log::warning('Chapa Equb webhook: charge was not successful', [
+            'reference' => $reference,
+            'event' => $payload['event'] ?? null,
+        ]);
+
+        return ['success' => false, 'message' => 'The charge was not successful.'];
+    }
+
+    /**
+     * One receipt per person, not per contribution.
+     *
+     * A member who just settled three places should get one message naming the
+     * total, not three texts each quoting a third of what left their account.
+     * Grouped by the payer's phone, since payerUser() resolves a held place to
+     * the sponsor who actually paid for it.
+     *
+     * @param  \Illuminate\Support\Collection<int, EqubPayment>  $payments
+     */
+    protected function announceEqubPaymentSettled($payments, string $reference): void
+    {
+        $receipts = [];
+
+        foreach ($payments as $payment) {
+            $membership = $payment->membership;
+            $phone = $membership?->payerUser()?->phone;
+
+            if (! $phone) {
+                continue;
+            }
+
+            $receipts[$phone] ??= ['total' => 0.0, 'held' => []];
+            $receipts[$phone]['total'] += (float) $payment->amount;
+
+            if ($membership->isResponsibilitySeat()) {
+                $receipts[$phone]['held'][] = $membership->displayName();
+            }
+        }
+
+        foreach ($receipts as $phone => $receipt) {
+            $held = $receipt['held'] !== []
+                ? ' This covers '.implode(', ', $receipt['held']).' as well as your own place.'
+                : '';
+
+            try {
+                app(\App\Services\SmsService::class)->sendSms(
+                    $phone,
+                    'Your Equb payment of '.number_format($receipt['total'], 2)
+                        .' ETB has been received successfully.'.$held,
+                    null,
+                    null
+                );
+            } catch (\Throwable $e) {
+                // A dead SMS gateway must never undo a settled payment.
+                Log::warning('Equb payment receipt SMS failed: '.$e->getMessage(), [
+                    'reference' => $reference,
+                ]);
+            }
+        }
     }
 }

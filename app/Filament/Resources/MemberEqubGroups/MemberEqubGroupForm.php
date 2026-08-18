@@ -12,11 +12,14 @@ use App\Enums\WinnerSelectionMode;
 use App\Models\EqubGroup;
 use App\Models\EqubPackage;
 use App\Models\Member;
+use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Placeholder;
+use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
+use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 use Illuminate\Support\HtmlString;
@@ -130,6 +133,72 @@ class MemberEqubGroupForm
                 ->maxLength(500)
                 ->columnSpanFull(),
 
+            // "My Responsibility People" — the same arrangement the app offers.
+            //
+            // Kept in its own section rather than mixed into "Add members"
+            // above, because the two are different commitments: an invited
+            // member pays their own way, while everyone listed here is paid
+            // for by the owner, every round, for the whole term. Merging them
+            // into one list is how an owner ends up owing five contributions a
+            // day without having understood that they agreed to it.
+            Section::make(__('filament.member_equb_group.responsibility_people'))
+                ->description(__('filament.member_equb_group.responsibility_people_helper'))
+                ->icon('heroicon-o-hand-raised')
+                ->collapsible()
+                ->collapsed(fn (Get $get): bool => empty($get('responsibility_people')))
+                ->columnSpanFull()
+                ->schema([
+                    Repeater::make('responsibility_people')
+                        ->hiddenLabel()
+                        ->addActionLabel(__('filament.member_equb_group.responsibility_add'))
+                        // The service applies the real per-sponsor cap on top
+                        // of this; the form limit is only so the page cannot
+                        // grow unbounded.
+                        ->maxItems(fn (): int => (int) config('services.equb.max_responsibility_people', 10))
+                        ->live()
+                        ->reorderable(false)
+                        ->itemLabel(fn (array $state): ?string => $state['name'] ?? null)
+                        ->collapsible()
+                        ->schema([
+                            // Present only when editing an existing group. It
+                            // is what lets the save path tell "this is Amina,
+                            // already in the circle" from "this is a new
+                            // Amina" — without it, every save would open a
+                            // duplicate place and a duplicate obligation.
+                            Hidden::make('membership_id'),
+
+                            TextInput::make('name')
+                                ->label(__('filament.member_equb_group.responsibility_name'))
+                                ->placeholder(__('filament.member_equb_group.responsibility_name_placeholder'))
+                                ->required()
+                                ->minLength(2)
+                                ->maxLength(120),
+
+                            // Optional on purpose. Most of these people have no
+                            // phone at all, which is the reason the feature
+                            // exists — requiring one would shut out exactly the
+                            // people it is for.
+                            TextInput::make('phone')
+                                ->label(__('filament.member_equb_group.responsibility_phone'))
+                                ->tel()
+                                ->maxLength(20)
+                                ->helperText(__('filament.member_equb_group.responsibility_phone_helper')),
+
+                            TextInput::make('relation')
+                                ->label(__('filament.member_equb_group.responsibility_relation'))
+                                ->placeholder(__('filament.member_equb_group.responsibility_relation_placeholder'))
+                                ->maxLength(40),
+
+                            TextInput::make('note')
+                                ->label(__('filament.member_equb_group.responsibility_note'))
+                                ->maxLength(200),
+                        ])
+                        ->columns(2)
+                        ->helperText(__('filament.member_equb_group.responsibility_limit', [
+                            'limit' => config('services.equb.max_responsibility_people', 10),
+                        ])),
+                ]),
+
             // Money, derived. Never an input.
             Placeholder::make('money_preview')
                 ->hiddenLabel()
@@ -206,12 +275,26 @@ class MemberEqubGroupForm
         }
 
         $perPerson = $parent->contributionPerPerson();
-        // The owner counts as a member, plus everyone being invited.
-        $heads = 1 + count((array) $get('member_ids'));
+
+        // Everyone who will hold a place: the owner, the members being added,
+        // and the people the owner is answerable for. The last group counts
+        // here for the same reason it counts in the pot — a place is a place,
+        // whoever pays for it.
+        $invited = count((array) $get('member_ids'));
+        $responsibility = count(array_filter(
+            (array) $get('responsibility_people'),
+            fn ($row): bool => is_array($row) && trim((string) ($row['name'] ?? '')) !== ''
+        ));
+
+        $heads = 1 + $invited + $responsibility;
         $rounds = max(1, $parent->totalRounds());
 
         $roundTotal = $perPerson * $heads;
         $fullTotal = $roundTotal * $rounds;
+
+        // What the owner alone owes each round: their own contribution plus
+        // one for every place they are holding.
+        $ownerShare = $perPerson * (1 + $responsibility);
 
         $f = fn (float $v): string => number_format($v, 2);
 
@@ -222,6 +305,20 @@ class MemberEqubGroupForm
                 <p class='mt-1 text-lg font-bold {$tone}'>{$value}</p>
             </div>";
 
+        // Only rendered once there is something to explain, so it reads as a
+        // consequence of adding someone rather than as permanent noise.
+        $ownerPanel = $responsibility > 0
+            ? "
+            <div class='mt-3 rounded-xl border border-purple-200 bg-purple-50 p-4 dark:border-purple-900 dark:bg-purple-950/30'>
+                <div class='grid grid-cols-2 gap-4'>
+                    ".$cell(__('filament.member_equb_group.responsibility_count'), (string) $responsibility, 'text-purple-700 dark:text-purple-300')."
+                    ".$cell(__('filament.member_equb_group.responsibility_owner_share'), $f($ownerShare).' ETB', 'text-purple-700 dark:text-purple-300')."
+                </div>
+                <p class='mt-2 text-xs text-purple-700/80 dark:text-purple-300/80'>"
+                    .e(__('filament.member_equb_group.responsibility_owner_share_note', ['count' => $responsibility]))."</p>
+            </div>"
+            : '';
+
         return new HtmlString("
             <div class='grid grid-cols-2 gap-4 rounded-xl border border-gray-200 bg-gray-50 p-4 sm:grid-cols-4 dark:border-gray-700 dark:bg-gray-800/50'>
                 ".$cell(__('filament.member_equb_group.per_person'), $f($perPerson).' ETB')."
@@ -229,6 +326,7 @@ class MemberEqubGroupForm
                 ".$cell(__('filament.member_equb_group.round_total'), $f($roundTotal).' ETB', 'text-primary-600 dark:text-primary-400')."
                 ".$cell(__('filament.member_equb_group.full_total')." ({$rounds})", $f($fullTotal).' ETB')."
             </div>
+            {$ownerPanel}
         ");
     }
 

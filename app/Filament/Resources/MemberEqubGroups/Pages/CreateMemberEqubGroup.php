@@ -5,6 +5,7 @@ namespace App\Filament\Resources\MemberEqubGroups\Pages;
 use App\Enums\EqubGroupModerationStatus;
 use App\Filament\Resources\MemberEqubGroups\MemberEqubGroupResource;
 use App\Models\Member;
+use App\Services\GroupResponsibilityService;
 use App\Services\MemberEqubGroupService;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\CreateRecord;
@@ -42,6 +43,17 @@ class CreateMemberEqubGroup extends CreateRecord
             array_map('intval', (array) ($data['member_ids'] ?? []))
         ));
 
+        // "My Responsibility People" — places held for someone with no Niya
+        // account. Pulled out before the service runs because they are not
+        // columns on the group; each becomes a membership of its own with the
+        // owner recorded as the sponsor.
+        $responsibilityPeople = array_values(array_filter(
+            (array) ($data['responsibility_people'] ?? []),
+            fn ($row): bool => is_array($row) && trim((string) ($row['name'] ?? '')) !== ''
+        ));
+
+        unset($data['responsibility_people']);
+
         $result = app(MemberEqubGroupService::class)->create($owner, $data);
 
         if (! $result['success']) {
@@ -70,6 +82,32 @@ class CreateMemberEqubGroup extends CreateRecord
                 Notification::make()
                     ->title(__('filament.member_equb_group.some_members_skipped'))
                     ->body(implode("\n", $added['skipped']))
+                    ->warning()
+                    ->send();
+            }
+        }
+
+        // Open a place for each person the owner is responsible for. Routed
+        // through the same service the app uses, so the per-sponsor cap, the
+        // duplicate-name guard and the phone normalisation all apply here too
+        // rather than being re-implemented for the panel.
+        if ($responsibilityPeople !== []) {
+            $seats = app(GroupResponsibilityService::class)
+                ->addMany($group->fresh(), $owner, $responsibilityPeople);
+
+            if (($seats['added'] ?? 0) > 0) {
+                Notification::make()
+                    ->title(__('filament.member_equb_group.responsibility_added', [
+                        'count' => $seats['added'],
+                    ]))
+                    ->success()
+                    ->send();
+            }
+
+            if (($seats['skipped'] ?? []) !== []) {
+                Notification::make()
+                    ->title(__('filament.member_equb_group.responsibility_skipped'))
+                    ->body(implode("\n", $seats['skipped']))
                     ->warning()
                     ->send();
             }

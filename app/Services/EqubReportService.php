@@ -194,7 +194,16 @@ class EqubReportService
     {
         $q = DB::table('equb_payments as p')
             ->join('equb_memberships as em', 'em.id', '=', 'p.equb_membership_id')
-            ->join('members as m', 'm.id', '=', 'em.member_id')
+            // Joined on whoever pays, not on the name attached to the place.
+            //
+            // A "My Responsibility People" place has a null member_id, so an
+            // inner join on em.member_id dropped every contribution made on
+            // one of those places out of the report entirely — real money
+            // collected and banked, missing from the takings an admin
+            // reconciles against. coalesce falls through to the sponsor, who
+            // is the member who actually paid, and the join is left so a row
+            // can never disappear even if both are somehow null.
+            ->leftJoin('members as m', 'm.id', '=', DB::raw('coalesce(em.member_id, em.sponsor_member_id)'))
             ->leftJoin('users as u', 'u.id', '=', 'm.user_id')
             ->join('equb_groups as eg', 'eg.id', '=', 'em.equb_group_id')
             // The platform Equb this group belongs to, when it is a
@@ -250,6 +259,10 @@ class EqubReportService
             $q->where(function (QueryBuilder $sub) use ($term): void {
                 $sub->where('m.full_name', 'like', $term)
                     ->orWhere('u.phone', 'like', $term)
+                    // The name on a place held for someone else lives on the
+                    // membership, not on a member row, so searching for a
+                    // child by name would otherwise never match.
+                    ->orWhere('em.responsibility_name', 'like', $term)
                     ->orWhere('p.reference', 'like', $term)
                     ->orWhere('eg.name', 'like', $term)
                     ->orWhere('peg.name', 'like', $term);
@@ -644,6 +657,11 @@ class EqubReportService
                 'p.reference',
                 'm.full_name as member_name',
                 'u.phone as member_phone',
+                // Whose place the contribution was for, when it is one held
+                // on someone else's behalf. member_name above is now the
+                // payer, which is the right anchor for a money report — but a
+                // reader still needs to see which place it settled.
+                'em.responsibility_name as held_for',
                 DB::raw(self::GROUP_NAME.' as group_name'),
                 DB::raw(self::GROUP_EQUB_NAME.' as group_equb_name'),
                 DB::raw(self::IS_GROUP_EQUB.' as is_group_equb'),
@@ -656,7 +674,14 @@ class EqubReportService
             ->get()
             ->map(fn ($r): array => [
                 'id' => (int) $r->id,
-                'member_name' => $r->member_name,
+                // Reads "Bilal (for Amina)" so one column carries both facts:
+                // whose money it was, and which place it paid off. Every
+                // surface that prints this row — table, PDF, CSV — gets it
+                // without needing its own column.
+                'member_name' => filled($r->held_for)
+                    ? trim(($r->member_name ?: '—').' ('.__('filament.equb_report.for').' '.$r->held_for.')')
+                    : $r->member_name,
+                'held_for' => $r->held_for,
                 'member_phone' => $r->member_phone,
                 'group_name' => $r->group_name,
                 // Null for a single Equb payment. The view shows the two side
@@ -695,6 +720,7 @@ class EqubReportService
                 'p.reference',
                 'm.full_name as member_name',
                 'u.phone as member_phone',
+                'em.responsibility_name as held_for',
                 DB::raw(self::GROUP_NAME.' as group_name'),
                 DB::raw(self::GROUP_EQUB_NAME.' as group_equb_name'),
                 DB::raw(self::PACKAGE_NAME.' as package_name'),

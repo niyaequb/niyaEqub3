@@ -12,7 +12,9 @@ use App\Models\EqubPayment;
 use App\Services\SmsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class EqubPaymentController extends Controller
 {
@@ -175,6 +177,163 @@ class EqubPaymentController extends Controller
             'message' => 'Payment recorded. It may require admin approval.',
             'data' => new EqubPaymentResource($payment->load(['membership.member.user', 'membership.sponsor.user', 'membership.equbGroup.package'])),
         ], 201);
+    }
+
+    /**
+     * Settle several contributions in one go.
+     *
+     * A member who holds places for "My Responsibility People" owes one
+     * contribution per place, every round. Each place keeps its own payment
+     * row — the ledger, the schedule and draw eligibility all count per place
+     * — but the member should go through checkout once, for the total.
+     *
+     * The rows are created up front and tied together by batch_reference; the
+     * gateway sees a single charge against that reference, and the webhook
+     * marks every row carrying it as paid together.
+     */
+    public function storeBatch(Request $request): JsonResponse
+    {
+        $member = $request->user()?->member;
+
+        if (! $member) {
+            return response()->json(['status' => 'error', 'message' => 'Member profile not found.'], 404);
+        }
+
+        $data = $request->validate([
+            'equb_membership_ids' => ['required', 'array', 'min:1', 'max:20'],
+            'equb_membership_ids.*' => ['integer'],
+            'payment_date' => ['required', 'date'],
+            'payment_method' => ['nullable', 'string'],
+        ]);
+
+        $ids = array_values(array_unique(array_map('intval', $data['equb_membership_ids'])));
+
+        $memberships = EqubMembership::query()
+            ->whereIn('id', $ids)
+            ->where(fn ($q) => $q
+                ->where('member_id', $member->id)
+                ->orWhere('sponsor_member_id', $member->id))
+            ->get();
+
+        // All or nothing. A partial batch would either charge for places the
+        // member did not choose or quietly skip one they did — both make the
+        // amount on the confirmation screen a lie.
+        if ($memberships->count() !== count($ids)) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Some of those contributions are not yours to pay.',
+            ], 403);
+        }
+
+        // Each place is charged its own contribution, read from the membership
+        // rather than from the request: the client never gets to say what
+        // something costs.
+        $total = round((float) $memberships->sum(fn (EqubMembership $m): float => (float) $m->contribution_amount), 2);
+
+        if ($total <= 0) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'These contributions have no amount set.',
+            ], 422);
+        }
+
+        $method = $data['payment_method'] ?? EqubPaymentMethod::Chapa->value;
+        $isOnline = $method === EqubPaymentMethod::Chapa->value;
+        $batchReference = 'EQUB-B'.strtoupper(Str::random(10));
+
+        try {
+            $payments = DB::transaction(function () use ($memberships, $data, $method, $isOnline, $batchReference) {
+                return $memberships->map(fn (EqubMembership $m): EqubPayment => EqubPayment::create([
+                    'equb_membership_id' => $m->id,
+                    'amount' => (float) $m->contribution_amount,
+                    'payment_date' => $data['payment_date'],
+                    'payment_method' => $isOnline
+                        ? EqubPaymentMethod::Chapa
+                        : ($method === EqubPaymentMethod::Offline->value
+                            ? EqubPaymentMethod::Offline
+                            : EqubPaymentMethod::Manual),
+                    'status' => EqubPaymentStatus::Pending,
+                    'batch_reference' => $batchReference,
+                ]));
+            });
+        } catch (\Throwable $e) {
+            Log::error('Batch Equb payment could not be created: '.$e->getMessage());
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Could not start this payment. Please try again.',
+            ], 500);
+        }
+
+        // Offline and manual settle immediately, exactly as the single path does.
+        if (! $isOnline) {
+            foreach ($payments as $payment) {
+                $payment->markAsPaid();
+                app(\App\Services\EqubMembershipService::class)->completeIfEligible($payment->membership);
+            }
+
+            $this->sendBatchSuccessNotification($member, $total, $payments->count());
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Payment recorded. It may require admin approval.',
+                'data' => EqubPaymentResource::collection($payments),
+            ], 201);
+        }
+
+        try {
+            $result = app(\App\Services\ChapaService::class)
+                ->initializeEqubBatchPayment($payments->all(), $batchReference, $total, $member);
+        } catch (\Throwable $e) {
+            $this->discardBatch($payments);
+
+            return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
+        }
+
+        if (! ($result['success'] ?? false)) {
+            // Nothing was charged, so the pending rows must not be left behind
+            // looking like money the member still owes.
+            $this->discardBatch($payments);
+
+            return response()->json([
+                'status' => 'error',
+                'message' => $result['message'] ?? 'Failed to initiate payment.',
+            ], 422);
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Payment initiated. Complete payment in the browser.',
+            'data' => EqubPaymentResource::collection($payments),
+            'checkout_url' => $result['checkout_url'],
+            'reference' => $batchReference,
+            'total_amount' => $total,
+            'contributions' => $payments->count(),
+        ], 201);
+    }
+
+    /** Rolls a batch back when the gateway never accepted it. */
+    protected function discardBatch(\Illuminate\Support\Collection $payments): void
+    {
+        foreach ($payments as $payment) {
+            $payment->delete();
+        }
+    }
+
+    protected function sendBatchSuccessNotification($member, float $total, int $count): void
+    {
+        $phone = $member->user?->phone;
+
+        if (! $phone) {
+            return;
+        }
+
+        $message = $count > 1
+            ? 'Your Equb payment of '.number_format($total, 2).' ETB covering '.$count
+                .' contributions has been received successfully.'
+            : 'Your Equb payment of '.number_format($total, 2).' ETB has been received successfully.';
+
+        app(SmsService::class)->sendSms($phone, $message, null, null);
     }
 
     protected function sendPaymentSuccessNotification(EqubPayment $payment): void

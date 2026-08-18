@@ -17,7 +17,15 @@ class EqubGroupController extends Controller
     {
         $member = $request->user()?->member;
         $query = EqubGroup::query()->with(['package', 'memberships' => function ($q) use ($member) {
-            $q->where('member_id', $member?->id)->with(['payments', 'winsAsWinner']);
+            // Same rule as show(): own membership plus any places held for
+            // others, so a card can quote what this member really owes.
+            $q->where(function ($sub) use ($member) {
+                $sub->where('member_id', $member?->id)
+                    ->orWhere('sponsor_member_id', $member?->id);
+            })
+                ->with(['payments', 'winsAsWinner', 'sponsor'])
+                ->orderByRaw('member_id is null')
+                ->orderBy('id');
         }]);
 
         // Member-created groups are private to their circle. They are served by
@@ -87,7 +95,22 @@ class EqubGroupController extends Controller
 
         $member = $request->user()?->member;
         $equbGroup->load(['package', 'memberships' => function ($q) use ($member) {
-            $q->where('member_id', $member?->id)->with(['payments', 'winsAsWinner']);
+            // The caller's own membership *and* every place they hold for
+            // someone else in this group ("My Responsibility People").
+            //
+            // Filtering on member_id alone is what made the payment screen
+            // quote one contribution when the member was actually liable for
+            // several: the seats they pay for were never sent down, so the
+            // screen had no way to know they existed.
+            $q->where(function ($sub) use ($member) {
+                $sub->where('member_id', $member?->id)
+                    ->orWhere('sponsor_member_id', $member?->id);
+            })
+                ->with(['payments', 'winsAsWinner', 'sponsor'])
+                // The member's own place first, so a client taking the first
+                // row still gets the row it expects.
+                ->orderByRaw('member_id is null')
+                ->orderBy('id');
         }]);
 
         return response()->json([

@@ -203,7 +203,16 @@ class CommissionService
         Log::info('[Commission] recordEqubPaymentCommission: start', ['equb_payment_id' => $equbPayment->id, 'amount' => $equbPayment->amount]);
 
         $membership = $equbPayment->membership;
-        $member = $membership?->member;
+
+        // The commission follows the money, not the name on the place.
+        //
+        // A "My Responsibility People" place has no member behind it, so
+        // reading membership->member returned null and this method quietly
+        // returned without recording anything — an agent lost commission on
+        // real money simply because their member was paying for a child.
+        // payerMember() resolves to the member on a normal membership and to
+        // the sponsor on a held place, which is whose money it actually was.
+        $member = $membership?->payerMember();
         $agent = $member?->agent;
 
         if (! $member || ! $agent) {
@@ -212,13 +221,19 @@ class CommissionService
                 'equb_membership_id' => $membership?->id,
                 'member_id' => $member?->id,
                 'agent_id' => $agent?->id,
+                'is_responsibility_seat' => (bool) $membership?->isResponsibilitySeat(),
             ]);
             return null;
         }
 
-        // Count how many paid Equb payments this member has (including the current one)
+        // Every paid contribution this member has made, on their own
+        // membership and on the places they hold for other people. Counted
+        // together because "is this their first payment?" is a question about
+        // the person, not about one of their memberships.
         $paidCount = EqubPayment::query()
-            ->whereHas('membership', fn ($q) => $q->where('member_id', $member->id))
+            ->whereHas('membership', fn ($q) => $q
+                ->where('member_id', $member->id)
+                ->orWhere('sponsor_member_id', $member->id))
             ->where('status', EqubPaymentStatus::Paid)
             ->count();
 

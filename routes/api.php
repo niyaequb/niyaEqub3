@@ -131,6 +131,10 @@ Route::middleware(['jwt.auth', 'active.user'])->group(function () {
         Route::post('equb-memberships/{equbMembership}/leave', [MemberEqubMembershipController::class, 'leave']);
         Route::get('equb-payments', [MemberEqubPaymentController::class, 'index']);
         Route::post('equb-payments', [MemberEqubPaymentController::class, 'store']);
+        // Settles several contributions in one charge — a member's own place
+        // plus the places they hold for "My Responsibility People". Declared
+        // above the {equbPayment} route so "batch" is never read as an id.
+        Route::post('equb-payments/batch', [MemberEqubPaymentController::class, 'storeBatch']);
         Route::get('equb-payments/{equbPayment}', [MemberEqubPaymentController::class, 'show']);
         Route::get('equb-draws', [MemberEqubDrawController::class, 'index']);
         Route::get('equb-draws/{equbDraw}', [MemberEqubDrawController::class, 'show']);

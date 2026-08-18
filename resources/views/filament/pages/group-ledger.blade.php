@@ -19,7 +19,10 @@
             ['Collected', $money($group['total_paid'] ?? 0), 'Of ' . $money($group['due_to_date'] ?? 0) . ' due so far'],
             ['Outstanding', $money($group['total_unpaid'] ?? 0), ($group['members_behind'] ?? 0) . ' member(s) behind'],
             ['Pot per round', $money($group['pot_per_round'] ?? 0), 'Round ' . (($group['rounds_completed'] ?? 0) + 1) . ' of ' . ($group['rounds_total'] ?? 0)],
-            ['Collection rate', $pct($group['collection_rate'] ?? 0), ($group['members_paid_up'] ?? 0) . ' of ' . ($group['members_count'] ?? 0) . ' up to date'],
+            ['Collection rate', $pct($group['collection_rate'] ?? 0), ($group['members_paid_up'] ?? 0) . ' of ' . ($group['members_count'] ?? 0) . ' up to date'
+                . (($group['responsibility_seats_count'] ?? 0) > 0
+                    ? ' · ' . $group['responsibility_seats_count'] . ' held for others'
+                    : '')],
         ] as [$label, $value, $hint])
             <x-filament::section class="!p-0">
                 <div class="p-4">
@@ -70,6 +73,27 @@
                                         <span class="ml-1 text-xs font-normal text-gray-500">· creator</span>
                                     @endif
                                 </div>
+                                {{-- A place held for someone with no Niya account. It pays in and
+                                     can win like any other member, so it belongs in this table —
+                                     but who owes the money has to be visible, or the circle reads
+                                     it as a member quietly in arrears. --}}
+                                @if (! empty($m['is_responsibility_seat']))
+                                    <div class="mt-1 flex flex-wrap items-center gap-1.5">
+                                        <span class="inline-flex items-center rounded-md bg-purple-50 px-1.5 py-0.5 text-[11px] font-medium text-purple-700 ring-1 ring-inset ring-purple-600/20 dark:bg-purple-400/10 dark:text-purple-300">
+                                            Responsibility
+                                        </span>
+                                        @if (! empty($m['sponsor_name']))
+                                            <span class="text-xs text-gray-500 dark:text-gray-400">
+                                                paid by {{ $m['sponsor_name'] }}
+                                            </span>
+                                        @endif
+                                        @if (! empty($m['relation']))
+                                            <span class="text-xs text-gray-400 dark:text-gray-500">
+                                                · {{ $m['relation'] }}
+                                            </span>
+                                        @endif
+                                    </div>
+                                @endif
                                 <div class="text-xs text-gray-500 dark:text-gray-400">{{ $m['phone'] }}</div>
                             </td>
                             <td class="py-3 pr-4">

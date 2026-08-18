@@ -34,6 +34,20 @@ class MemberEqubGroupsTable
                 TextColumn::make('package.name')->label(__('filament.equb_group.package'))->toggleable(),
                 TextColumn::make('fixed_contribution_amount')->label(__('filament.equb_group.contribution'))->money('ETB')->sortable(),
                 TextColumn::make('current_members_count')->label(__('filament.equb_group.current_members_count'))->sortable(),
+
+                // How much of that head-count is places held for people with
+                // no Niya account. Already inside current_members_count — this
+                // is the breakdown, so an admin can see at a glance that a
+                // group of 8 is really 3 accounts carrying 5 places.
+                TextColumn::make('responsibility_seats_count')
+                    ->label(__('filament.member_equb_group.responsibility_column'))
+                    ->badge()
+                    ->color('info')
+                    ->toggleable()
+                    ->counts([
+                        'memberships as responsibility_seats_count' => fn ($q) => $q->whereNull('member_id'),
+                    ])
+                    ->formatStateUsing(fn ($state): string => ((int) $state) > 0 ? (string) $state : '—'),
                 TextColumn::make('has_won_round')
                     ->label(__('filament.member_equb_group.winning_status'))
                     ->badge()
@@ -142,7 +156,17 @@ class MemberEqubGroupsTable
                                 ->label(__('filament.member_equb_group.pick_winners'))
                                 ->options(fn (): array => app(GroupDrawService::class)
                                     ->eligibleMemberships($record)
-                                    ->mapWithKeys(fn ($m): array => [$m->id => $m->member?->full_name ?? "Member #{$m->member_id}"])
+                                    // displayName() covers places held for
+                                    // someone with no Niya account, which have
+                                    // no member row and used to render here as
+                                    // a bare "Member #".
+                                    ->mapWithKeys(fn ($m): array => [
+                                        $m->id => $m->isResponsibilitySeat()
+                                            ? $m->displayName().' — '.__('filament.member_equb_group.responsibility_paid_by', [
+                                                'name' => $m->sponsor?->full_name ?? '',
+                                            ])
+                                            : $m->displayName(),
+                                    ])
                                     ->toArray())
                                 ->columns(2)
                                 ->helperText(__('filament.member_equb_group.pick_winners_hint')),
