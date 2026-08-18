@@ -15,6 +15,15 @@ use App\Services\AuthService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
+/**
+ * Phone-verified onboarding, session issue and session teardown.
+ *
+ * The onboarding sequence is mandatory and ordered: send-otp, verify-otp, register, login.
+ * Registration deliberately returns `token: null` — a separate sign-in call is required to
+ * obtain a usable credential.
+ *
+ * @group Authentication
+ */
 class AuthController extends Controller
 {
     protected AuthService $authService;

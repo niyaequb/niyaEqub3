@@ -16,6 +16,20 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
+/**
+ * Contribution collection for members.
+ *
+ * Every contribution is collected through the Chapa gateway. A record is created in the
+ * `pending` state with a hosted checkout URL and becomes `paid` only once the gateway
+ * callback has been received and independently verified. Neither the 201 response nor the
+ * payer's return from checkout is proof of settlement.
+ *
+ * Scope follows the money: a member sees and pays their own contributions and every
+ * contribution on a place they sponsor for someone without an account.
+ *
+ * @group Member · Contributions
+ * @authenticated
+ */
 class EqubPaymentController extends Controller
 {
     /**

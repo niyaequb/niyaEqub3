@@ -12,6 +12,17 @@ use App\Services\SmsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
+/**
+ * Contribution register and reconciliation surface for operators.
+ *
+ * Unlike the member endpoints, these are not scoped to a single payer and reach every
+ * contribution on the platform. `PUT` with a status transition from `pending` to `paid` is
+ * the only settlement route other than the gateway callback, and exists solely for charges
+ * the gateway took but never reported — always confirm against the gateway first.
+ *
+ * @group Admin · Contributions
+ * @authenticated
+ */
 class EqubPaymentController extends Controller
 {
     public function index(Request $request): JsonResponse

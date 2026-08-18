@@ -11,6 +11,17 @@ use App\Services\FcmService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
+/**
+ * Membership participation: joining an Equb, viewing places held, and leaving.
+ *
+ * A membership is the unit of obligation — every contribution is made against a membership
+ * identifier, never against a member. One member may hold several memberships in the same
+ * group where they sponsor places for people without accounts, so pass
+ * `include_responsibility=1` when the caller's full liability is needed.
+ *
+ * @group Member · Memberships
+ * @authenticated
+ */
 class EqubMembershipController extends Controller
 {
     /**

@@ -27,8 +27,18 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 
 /**
- * Member-created Equb groups ("Group Equb"): create one, invite your circle,
- * watch who has paid, and run the winner-group draw.
+ * Private Group Equbs created and run by members.
+ *
+ * A Group Equb is a private circle a member creates inside a parent platform Equb and fills
+ * with their own family, colleagues or neighbours. The creator invites members, watches the
+ * ledger, and runs the winner-group draw; the platform supplies the contribution amount, the
+ * terms and the winner rules, none of which the creator may set.
+ *
+ * Groups created here enter administrative moderation and cannot be started until approved.
+ * Once started, the winner split plan is frozen.
+ *
+ * @group Member · Group Equb
+ * @authenticated
  */
 class MyEqubGroupController extends Controller
 {

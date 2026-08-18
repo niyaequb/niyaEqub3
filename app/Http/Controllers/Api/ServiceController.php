@@ -16,14 +16,34 @@ use Throwable;
  * index exists because the base URL is the first thing an integrator opens,
  * and an unadorned 404 there reads as a broken service rather than as a
  * path with no resource on it.
+ *
+ * @group Service
  */
 class ServiceController extends Controller
 {
     /**
-     * GET /api
+     * Service index
      *
-     * Service index. Confirms the caller has reached the right deployment
-     * and points them at the specification.
+     * Confirms the caller has reached the correct deployment and points them at the
+     * specification. Use this as a connectivity smoke test during integration setup:
+     * it touches no dependencies, so a 200 here means only that the application is
+     * serving. Use the health check to confirm the dependencies behind it.
+     *
+     * @unauthenticated
+     *
+     * @response 200 {
+     *   "status": "success",
+     *   "service": "Niya Umrah Equb API",
+     *   "version": "2.1",
+     *   "documentation": "https://niya-et.com/developers",
+     *   "support": "support@niya-et.com",
+     *   "server_time": "2026-08-18T09:12:44+00:00",
+     *   "resources": {
+     *     "health": "https://cms.niya-et.com/api/health",
+     *     "settings": "https://cms.niya-et.com/api/settings",
+     *     "login": "https://cms.niya-et.com/api/auth/login"
+     *   }
+     * }
      */
     public function index(): JsonResponse
     {
@@ -43,14 +63,31 @@ class ServiceController extends Controller
     }
 
     /**
-     * GET /api/health
+     * Health check
      *
-     * Dependency check for uptime monitoring and partner smoke tests.
-     * Returns 200 while every dependency responds and 503 as soon as one
-     * does not, so a monitor can alert on the status code alone.
+     * Dependency probe for uptime monitoring and partner smoke tests. Returns 200 while
+     * every dependency responds and 503 as soon as one does not, so a monitor can alert
+     * on the status code alone.
      *
-     * Failure details are logged, never returned: this endpoint is public,
+     * Failure detail is logged server-side and never returned: this endpoint is public,
      * and a connection string in an error message is a disclosure.
+     *
+     * @unauthenticated
+     *
+     * @response 200 {
+     *   "status": "success",
+     *   "health": "ok",
+     *   "checks": { "database": "ok", "cache": "ok" },
+     *   "version": "2.1",
+     *   "server_time": "2026-08-18T09:12:44+00:00"
+     * }
+     * @response 503 {
+     *   "status": "error",
+     *   "health": "degraded",
+     *   "checks": { "database": "unavailable", "cache": "ok" },
+     *   "version": "2.1",
+     *   "server_time": "2026-08-18T09:12:44+00:00"
+     * }
      */
     public function health(): JsonResponse
     {
