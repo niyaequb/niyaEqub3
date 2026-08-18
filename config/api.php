@@ -28,8 +28,9 @@ return [
     /*
     | Where an integrator should go for the full specification. Returned in
     | the service index and in 404 responses so a wrong path is self-correcting.
+    | Points at the generated Scribe output; see DOCS.md.
     */
-    'documentation_url' => env('API_DOCS_URL', 'https://niya-et.com/developers'),
+    'documentation_url' => env('API_DOCS_URL', 'https://cms.niya-et.com/docs'),
 
     /*
     | Contact address for integration support.
