@@ -1,0 +1,2836 @@
+openapi: 3.0.3
+info:
+  title: 'Niya Umrah Equb API'
+  description: 'REST API for the Niya Umrah Equb digital rotating-savings platform. Covers member participation, private Group Equbs, contribution collection and settlement, the agent network, and platform administration.'
+  version: 2.1.0
+  contact:
+    name: 'Niya Umrah Equb Engineering'
+    email: support@niya-et.com
+servers:
+  -
+    url: 'https://cms.niya-et.com'
+tags:
+  -
+    name: Service
+    description: ''
+  -
+    name: Authentication
+    description: ''
+  -
+    name: 'Member · Memberships'
+    description: ''
+  -
+    name: 'Member · Contributions'
+    description: ''
+  -
+    name: 'Member · Group Equb'
+    description: ''
+  -
+    name: 'Admin · Contributions'
+    description: ''
+  -
+    name: Endpoints
+    description: ''
+components:
+  securitySchemes:
+    default:
+      type: http
+      scheme: bearer
+      description: 'Obtain a token from <code>POST /auth/login</code>. Tokens expire after 60 minutes and can be refreshed for up to 14 days via <code>POST /auth/refresh</code>.'
+security:
+  -
+    default: []
+paths:
+  /api:
+    get:
+      summary: 'Service index'
+      operationId: serviceIndex
+      description: "Confirms the caller has reached the correct deployment and points them at the\nspecification. Use this as a connectivity smoke test during integration setup:\nit touches no dependencies, so a 200 here means only that the application is\nserving. Use the health check to confirm the dependencies behind it."
+      parameters: []
+      responses:
+        200:
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: object
+                example:
+                  status: success
+                  service: 'Niya Umrah Equb API'
+                  version: '2.1'
+                  documentation: 'https://niya-et.com/developers'
+                  support: support@niya-et.com
+                  server_time: '2026-08-18T09:12:44+00:00'
+                  resources:
+                    health: 'https://cms.niya-et.com/api/health'
+                    settings: 'https://cms.niya-et.com/api/settings'
+                    login: 'https://cms.niya-et.com/api/auth/login'
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  service:
+                    type: string
+                    example: 'Niya Umrah Equb API'
+                  version:
+                    type: string
+                    example: '2.1'
+                  documentation:
+                    type: string
+                    example: 'https://niya-et.com/developers'
+                  support:
+                    type: string
+                    example: support@niya-et.com
+                  server_time:
+                    type: string
+                    example: '2026-08-18T09:12:44+00:00'
+                  resources:
+                    type: object
+                    properties:
+                      health:
+                        type: string
+                        example: 'https://cms.niya-et.com/api/health'
+                      settings:
+                        type: string
+                        example: 'https://cms.niya-et.com/api/settings'
+                      login:
+                        type: string
+                        example: 'https://cms.niya-et.com/api/auth/login'
+      tags:
+        - Service
+      security: []
+  /api/health:
+    get:
+      summary: 'Health check'
+      operationId: healthCheck
+      description: "Dependency probe for uptime monitoring and partner smoke tests. Returns 200 while\nevery dependency responds and 503 as soon as one does not, so a monitor can alert\non the status code alone.\n\nFailure detail is logged server-side and never returned: this endpoint is public,\nand a connection string in an error message is a disclosure."
+      parameters: []
+      responses:
+        200:
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: object
+                example:
+                  status: success
+                  health: ok
+                  checks:
+                    database: ok
+                    cache: ok
+                  version: '2.1'
+                  server_time: '2026-08-18T09:12:44+00:00'
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  health:
+                    type: string
+                    example: ok
+                  checks:
+                    type: object
+                    properties:
+                      database:
+                        type: string
+                        example: ok
+                      cache:
+                        type: string
+                        example: ok
+                  version:
+                    type: string
+                    example: '2.1'
+                  server_time:
+                    type: string
+                    example: '2026-08-18T09:12:44+00:00'
+        503:
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: object
+                example:
+                  status: error
+                  health: degraded
+                  checks:
+                    database: unavailable
+                    cache: ok
+                  version: '2.1'
+                  server_time: '2026-08-18T09:12:44+00:00'
+                properties:
+                  status:
+                    type: string
+                    example: error
+                  health:
+                    type: string
+                    example: degraded
+                  checks:
+                    type: object
+                    properties:
+                      database:
+                        type: string
+                        example: unavailable
+                      cache:
+                        type: string
+                        example: ok
+                  version:
+                    type: string
+                    example: '2.1'
+                  server_time:
+                    type: string
+                    example: '2026-08-18T09:12:44+00:00'
+      tags:
+        - Service
+      security: []
+  /api/auth/send-otp:
+    post:
+      summary: 'Send OTP for phone verification.'
+      operationId: sendOTPForPhoneVerification
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Authentication
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                phone:
+                  type: string
+                  description: 'Must match the regex /^\+?[1-9]\d{1,14}$/.'
+                  example: '9425593'
+              required:
+                - phone
+      security: []
+  /api/auth/check-user:
+    post:
+      summary: ''
+      operationId: postApiAuthCheckUser
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Authentication
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                phone:
+                  type: string
+                  description: 'Must match the regex /^\+?[1-9]\d{1,14}$/.'
+                  example: '9425593'
+              required:
+                - phone
+      security: []
+  /api/auth/verify-otp:
+    post:
+      summary: 'Verify OTP code.'
+      operationId: verifyOTPCode
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Authentication
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                phone:
+                  type: string
+                  description: 'Must match the regex /^\+?[1-9]\d{1,14}$/.'
+                  example: '9425593'
+                verificationId:
+                  type: string
+                  description: ''
+                  example: architecto
+                code:
+                  type: string
+                  description: 'Must be 4 digits. Must match the regex /^\d{4}$/.'
+                  example: '5642'
+              required:
+                - phone
+                - verificationId
+                - code
+      security: []
+  /api/auth/register:
+    post:
+      summary: 'Register a new user.'
+      operationId: registerANewUser
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Authentication
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                type:
+                  type: string
+                  description: ''
+                  example: member
+                  enum:
+                    - member
+                    - agent
+                  nullable: true
+                full_name:
+                  type: string
+                  description: 'Must not be greater than 255 characters.'
+                  example: b
+                phone:
+                  type: string
+                  description: 'Must match the regex /^\+?[1-9]\d{1,14}$/.'
+                  example: '9425593'
+                email:
+                  type: string
+                  description: 'Must be a valid email address. Must not be greater than 255 characters.'
+                  example: lafayette.considine@example.com
+                  nullable: true
+                city:
+                  type: string
+                  description: 'Must not be greater than 255 characters.'
+                  example: a
+                  nullable: true
+                password:
+                  type: string
+                  description: 'Must be at least 8 characters.'
+                  example: '/#iw/kXaz'
+                bank_name:
+                  type: string
+                  description: 'Must not be greater than 255 characters.'
+                  example: v
+                  nullable: true
+                account_number:
+                  type: string
+                  description: 'Must not be greater than 50 characters.'
+                  example: q
+                  nullable: true
+                account_holder_name:
+                  type: string
+                  description: 'Must not be greater than 255 characters.'
+                  example: w
+                  nullable: true
+                referral_code:
+                  type: string
+                  description: 'The <code>referral_code</code> of an existing record in the agents table.'
+                  example: architecto
+                  nullable: true
+              required:
+                - full_name
+                - phone
+                - password
+      security: []
+  /api/auth/login:
+    post:
+      summary: 'Authenticate user and return JWT token.'
+      operationId: authenticateUserAndReturnJWTToken
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Authentication
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                phone:
+                  type: string
+                  description: 'Must match the regex /^\+?[1-9]\d{1,14}$/.'
+                  example: '9425593'
+                password:
+                  type: string
+                  description: ''
+                  example: '|]|{+-'
+              required:
+                - phone
+                - password
+      security: []
+  /api/auth/reset-password:
+    post:
+      summary: 'Reset password using OTP.'
+      operationId: resetPasswordUsingOTP
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Authentication
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                phone:
+                  type: string
+                  description: 'Must match the regex /^\+?[1-9]\d{1,14}$/.'
+                  example: '9425593'
+                password:
+                  type: string
+                  description: 'Must be at least 8 characters.'
+                  example: Ygxwmi/
+              required:
+                - phone
+                - password
+      security: []
+  /api/auth/delete-account-by-phone:
+    post:
+      summary: ''
+      operationId: postApiAuthDeleteAccountByPhone
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Authentication
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                phone:
+                  type: string
+                  description: 'Must match the regex /^\+?[1-9]\d{1,14}$/.'
+                  example: '9425593'
+              required:
+                - phone
+      security: []
+  /api/auth/refresh:
+    post:
+      summary: 'Refresh JWT token.'
+      operationId: refreshJWTToken
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Authentication
+      security: []
+  /api/auth/me:
+    get:
+      summary: 'Get authenticated user information.'
+      operationId: getAuthenticatedUserInformation
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Authentication
+      security: []
+  /api/auth/logout:
+    post:
+      summary: 'Logout user by invalidating token.'
+      operationId: logoutUserByInvalidatingToken
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Authentication
+      security: []
+  /api/auth/delete-account:
+    post:
+      summary: ''
+      operationId: postApiAuthDeleteAccount
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Authentication
+      security: []
+  /api/member/equb-memberships:
+    get:
+      summary: "List current user's Equb memberships."
+      operationId: listCurrentUsersEqubMemberships
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - 'Member · Memberships'
+    post:
+      summary: 'Join an Equb group (create membership).'
+      operationId: joinAnEqubGroupcreateMembership
+      description: "After joining, subscribe the device's FCM token to the group draw topic\nso the member automatically receives draw push notifications."
+      parameters: []
+      responses: {  }
+      tags:
+        - 'Member · Memberships'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                equb_group_id:
+                  type: string
+                  description: 'The <code>id</code> of an existing record in the equb_groups table.'
+                  example: architecto
+              required:
+                - equb_group_id
+  '/api/member/equb-memberships/{equbMembership_id}':
+    get:
+      summary: 'Show one of my memberships.'
+      operationId: showOneOfMyMemberships
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - 'Member · Memberships'
+    parameters:
+      -
+        in: path
+        name: equbMembership_id
+        description: 'The ID of the equbMembership.'
+        example: 1
+        required: true
+        schema:
+          type: integer
+  '/api/member/equb-memberships/{equbMembership_id}/leave':
+    post:
+      summary: 'Leave an Equb group if no payments have been made.'
+      operationId: leaveAnEqubGroupIfNoPaymentsHaveBeenMade
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - 'Member · Memberships'
+    parameters:
+      -
+        in: path
+        name: equbMembership_id
+        description: 'The ID of the equbMembership.'
+        example: 1
+        required: true
+        schema:
+          type: integer
+  /api/member/equb-payments:
+    get:
+      summary: "List payments for current user's memberships."
+      operationId: listPaymentsForCurrentUsersMemberships
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - 'Member · Contributions'
+    post:
+      summary: 'Create a payment (offline) or initiate Chapa (online).'
+      operationId: createAPaymentofflineOrInitiateChapaonline
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - 'Member · Contributions'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                equb_membership_id:
+                  type: string
+                  description: 'The <code>id</code> of an existing record in the equb_memberships table.'
+                  example: architecto
+                amount:
+                  type: number
+                  description: 'Must be at least 0.'
+                  example: 39
+                payment_date:
+                  type: string
+                  description: 'Must be a valid date.'
+                  example: '2026-08-18T20:18:51'
+                payment_method:
+                  type: string
+                  description: ''
+                  example: offline
+                  enum:
+                    - chapa
+                    - offline
+                    - manual
+              required:
+                - equb_membership_id
+                - amount
+                - payment_date
+                - payment_method
+  /api/member/equb-payments/batch:
+    post:
+      summary: 'Settle several contributions in one go.'
+      operationId: settleSeveralContributionsInOneGo
+      description: "A member who holds places for \"My Responsibility People\" owes one\ncontribution per place, every round. Each place keeps its own payment\nrow — the ledger, the schedule and draw eligibility all count per place\n— but the member should go through checkout once, for the total.\n\nThe rows are created up front and tied together by batch_reference; the\ngateway sees a single charge against that reference, and the webhook\nmarks every row carrying it as paid together."
+      parameters: []
+      responses: {  }
+      tags:
+        - 'Member · Contributions'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                equb_membership_ids:
+                  type: array
+                  description: ''
+                  example:
+                    - 16
+                  items:
+                    type: integer
+                payment_date:
+                  type: string
+                  description: 'Must be a valid date.'
+                  example: '2026-08-18T20:18:51'
+                payment_method:
+                  type: string
+                  description: ''
+                  example: architecto
+                  nullable: true
+              required:
+                - payment_date
+  '/api/member/equb-payments/{equbPayment_id}':
+    get:
+      summary: "Show a single payment (only if it belongs to current user's membership)."
+      operationId: showASinglePaymentonlyIfItBelongsToCurrentUsersMembership
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - 'Member · Contributions'
+    parameters:
+      -
+        in: path
+        name: equbPayment_id
+        description: 'The ID of the equbPayment.'
+        example: 1
+        required: true
+        schema:
+          type: integer
+  /api/member/joinable-equb-groups:
+    get:
+      summary: 'Platform Equbs a member can build a Group Equb inside.'
+      operationId: platformEqubsAMemberCanBuildAGroupEqubInside
+      description: 'The contribution per person comes from here, never from the member.'
+      parameters: []
+      responses: {  }
+      tags:
+        - 'Member · Group Equb'
+  /api/member/my-equb-groups:
+    get:
+      summary: 'Groups I created or was invited into.'
+      operationId: groupsICreatedOrWasInvitedInto
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - 'Member · Group Equb'
+    post:
+      summary: ''
+      operationId: postApiMemberMyEqubGroups
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - 'Member · Group Equb'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                parent_equb_group_id:
+                  type: integer
+                  description: 'The <code>id</code> of an existing record in the equb_groups table.'
+                  example: 16
+                name:
+                  type: string
+                  description: 'Must not be greater than 120 characters.'
+                  example: 'n'
+                description:
+                  type: string
+                  description: 'Must not be greater than 500 characters.'
+                  example: 'Animi quos velit et fugiat.'
+                  nullable: true
+                allow_member_invites:
+                  type: boolean
+                  description: ''
+                  example: false
+                  nullable: true
+                invite_member_ids:
+                  type: array
+                  description: 'The <code>id</code> of an existing record in the members table.'
+                  example:
+                    - 16
+                  items:
+                    type: integer
+                invite_phones:
+                  type: array
+                  description: 'Must not be greater than 20 characters.'
+                  example:
+                    - ngzmiyvdljnikhwa
+                  items:
+                    type: string
+                responsibility_people:
+                  type: array
+                  description: 'Must not have more than 20 items.'
+                  example: null
+                  items:
+                    type: object
+                    nullable: true
+                    properties:
+                      name:
+                        type: string
+                        description: 'Must be at least 2 characters. Must not be greater than 120 characters.'
+                        example: 'y'
+                      phone:
+                        type: string
+                        description: 'Must not be greater than 20 characters.'
+                        example: kcmyuwpwlvqwrsit
+                        nullable: true
+                      relation:
+                        type: string
+                        description: 'Must not be greater than 40 characters.'
+                        example: c
+                        nullable: true
+                      note:
+                        type: string
+                        description: 'Must not be greater than 200 characters.'
+                        example: p
+                        nullable: true
+                    required:
+                      - name
+              required:
+                - parent_equb_group_id
+                - name
+  /api/member/my-equb-groups/join-by-code:
+    post:
+      summary: 'Ask to join a group using a shared invite code.'
+      operationId: askToJoinAGroupUsingASharedInviteCode
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - 'Member · Group Equb'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                invite_code:
+                  type: string
+                  description: 'Must not be greater than 12 characters.'
+                  example: bngz
+              required:
+                - invite_code
+  '/api/member/my-equb-groups/by-code/{code}':
+    get:
+      summary: 'Preview a group from a shared invite code, before asking to join.'
+      operationId: previewAGroupFromASharedInviteCodeBeforeAskingToJoin
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - 'Member · Group Equb'
+    parameters:
+      -
+        in: path
+        name: code
+        description: ''
+        example: architecto
+        required: true
+        schema:
+          type: string
+  '/api/member/my-equb-groups/{equbGroup_id}/requests':
+    get:
+      summary: 'Pending join requests for a group the caller owns.'
+      operationId: pendingJoinRequestsForAGroupTheCallerOwns
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - 'Member · Group Equb'
+    parameters:
+      -
+        in: path
+        name: equbGroup_id
+        description: 'The ID of the equbGroup.'
+        example: 1
+        required: true
+        schema:
+          type: integer
+  '/api/member/my-equb-groups/{equbGroup_id}/requests/{invitation_id}':
+    post:
+      summary: 'Owner approves or declines a request.'
+      operationId: ownerApprovesOrDeclinesARequest
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - 'Member · Group Equb'
+    parameters:
+      -
+        in: path
+        name: equbGroup_id
+        description: 'The ID of the equbGroup.'
+        example: 1
+        required: true
+        schema:
+          type: integer
+      -
+        in: path
+        name: invitation_id
+        description: 'The ID of the invitation.'
+        example: 1
+        required: true
+        schema:
+          type: integer
+  '/api/member/my-equb-groups/{equbGroup_id}/responsibility-people':
+    get:
+      summary: 'The people being carried in this group.'
+      operationId: thePeopleBeingCarriedInThisGroup
+      description: "The creator sees the whole circle's seats, because they are answerable\nfor the group's collection rate. Everyone else sees only their own — who\nelse's child is in the Equb is not their business."
+      parameters: []
+      responses: {  }
+      tags:
+        - 'Member · Group Equb'
+    post:
+      summary: ''
+      operationId: postApiMemberMyEqubGroupsEqubGroup_idResponsibilityPeople
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - 'Member · Group Equb'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  description: 'Must be at least 2 characters. Must not be greater than 120 characters.'
+                  example: b
+                phone:
+                  type: string
+                  description: 'Must not be greater than 20 characters.'
+                  example: ngzmiyvdljnikhwa
+                  nullable: true
+                relation:
+                  type: string
+                  description: 'Must not be greater than 40 characters.'
+                  example: 'y'
+                  nullable: true
+                note:
+                  type: string
+                  description: 'Must not be greater than 200 characters.'
+                  example: k
+                  nullable: true
+              required:
+                - name
+    parameters:
+      -
+        in: path
+        name: equbGroup_id
+        description: 'The ID of the equbGroup.'
+        example: 1
+        required: true
+        schema:
+          type: integer
+  '/api/member/my-equb-groups/{equbGroup_id}/responsibility-people/{equbMembership_id}':
+    patch:
+      summary: ''
+      operationId: patchApiMemberMyEqubGroupsEqubGroup_idResponsibilityPeopleEqubMembership_id
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - 'Member · Group Equb'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  description: 'Must be at least 2 characters. Must not be greater than 120 characters.'
+                  example: b
+                phone:
+                  type: string
+                  description: 'Must not be greater than 20 characters.'
+                  example: ngzmiyvdljnikhwa
+                  nullable: true
+                relation:
+                  type: string
+                  description: 'Must not be greater than 40 characters.'
+                  example: 'y'
+                  nullable: true
+                note:
+                  type: string
+                  description: 'Must not be greater than 200 characters.'
+                  example: k
+                  nullable: true
+    delete:
+      summary: ''
+      operationId: deleteApiMemberMyEqubGroupsEqubGroup_idResponsibilityPeopleEqubMembership_id
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - 'Member · Group Equb'
+    parameters:
+      -
+        in: path
+        name: equbGroup_id
+        description: 'The ID of the equbGroup.'
+        example: 1
+        required: true
+        schema:
+          type: integer
+      -
+        in: path
+        name: equbMembership_id
+        description: 'The ID of the equbMembership.'
+        example: 1
+        required: true
+        schema:
+          type: integer
+  '/api/member/my-equb-groups/{equbGroup_id}':
+    get:
+      summary: ''
+      operationId: getApiMemberMyEqubGroupsEqubGroup_id
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - 'Member · Group Equb'
+    parameters:
+      -
+        in: path
+        name: equbGroup_id
+        description: 'The ID of the equbGroup.'
+        example: 1
+        required: true
+        schema:
+          type: integer
+  '/api/member/my-equb-groups/{equbGroup_id}/ledger':
+    get:
+      summary: 'The paid / unpaid dashboard for the whole circle.'
+      operationId: thePaidUnpaidDashboardForTheWholeCircle
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - 'Member · Group Equb'
+    parameters:
+      -
+        in: path
+        name: equbGroup_id
+        description: 'The ID of the equbGroup.'
+        example: 1
+        required: true
+        schema:
+          type: integer
+  '/api/member/my-equb-groups/{equbGroup_id}/invitations':
+    get:
+      summary: 'Invitations the owner has sent for this group.'
+      operationId: invitationsTheOwnerHasSentForThisGroup
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - 'Member · Group Equb'
+    post:
+      summary: ''
+      operationId: postApiMemberMyEqubGroupsEqubGroup_idInvitations
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - 'Member · Group Equb'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                member_ids:
+                  type: array
+                  description: 'The <code>id</code> of an existing record in the members table.'
+                  example:
+                    - 16
+                  items:
+                    type: integer
+                phones:
+                  type: array
+                  description: 'Must not be greater than 20 characters.'
+                  example:
+                    - ngzmiyvdljnikhwa
+                  items:
+                    type: string
+                message:
+                  type: string
+                  description: 'Must not be greater than 200 characters.'
+                  example: 'y'
+                  nullable: true
+    parameters:
+      -
+        in: path
+        name: equbGroup_id
+        description: 'The ID of the equbGroup.'
+        example: 1
+        required: true
+        schema:
+          type: integer
+  '/api/member/my-equb-groups/{equbGroup_id}/members/{equbMembership_id}':
+    delete:
+      summary: ''
+      operationId: deleteApiMemberMyEqubGroupsEqubGroup_idMembersEqubMembership_id
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - 'Member · Group Equb'
+    parameters:
+      -
+        in: path
+        name: equbGroup_id
+        description: 'The ID of the equbGroup.'
+        example: 1
+        required: true
+        schema:
+          type: integer
+      -
+        in: path
+        name: equbMembership_id
+        description: 'The ID of the equbMembership.'
+        example: 1
+        required: true
+        schema:
+          type: integer
+  '/api/member/my-equb-groups/{equbGroup_id}/split-plan':
+    get:
+      summary: 'Preview the winner-group split before starting.'
+      operationId: previewTheWinnerGroupSplitBeforeStarting
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - 'Member · Group Equb'
+    parameters:
+      -
+        in: path
+        name: equbGroup_id
+        description: 'The ID of the equbGroup.'
+        example: 1
+        required: true
+        schema:
+          type: integer
+  '/api/member/my-equb-groups/{equbGroup_id}/start':
+    post:
+      summary: ''
+      operationId: postApiMemberMyEqubGroupsEqubGroup_idStart
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - 'Member · Group Equb'
+    parameters:
+      -
+        in: path
+        name: equbGroup_id
+        description: 'The ID of the equbGroup.'
+        example: 1
+        required: true
+        schema:
+          type: integer
+  '/api/member/my-equb-groups/{equbGroup_id}/cancel':
+    post:
+      summary: ''
+      operationId: postApiMemberMyEqubGroupsEqubGroup_idCancel
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - 'Member · Group Equb'
+    parameters:
+      -
+        in: path
+        name: equbGroup_id
+        description: 'The ID of the equbGroup.'
+        example: 1
+        required: true
+        schema:
+          type: integer
+  '/api/member/my-equb-groups/{equbGroup_id}/draws':
+    get:
+      summary: 'Draw history: every round with its full winner group.'
+      operationId: drawHistoryEveryRoundWithItsFullWinnerGroup
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - 'Member · Group Equb'
+    post:
+      summary: 'Run one round: automatic winner group, or a hand-picked one.'
+      operationId: runOneRoundAutomaticWinnerGroupOrAHandPickedOne
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - 'Member · Group Equb'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                membership_ids:
+                  type: array
+                  description: 'The <code>id</code> of an existing record in the equb_memberships table.'
+                  example:
+                    - 16
+                  items:
+                    type: integer
+                winners_count:
+                  type: integer
+                  description: 'Must be at least 1. Must not be greater than 200.'
+                  example: 22
+                  nullable: true
+    parameters:
+      -
+        in: path
+        name: equbGroup_id
+        description: 'The ID of the equbGroup.'
+        example: 1
+        required: true
+        schema:
+          type: integer
+  '/api/member/my-equb-groups/{equbGroup_id}/remind-unpaid':
+    post:
+      summary: 'Text everyone who is behind on contributions. Once per day per group.'
+      operationId: textEveryoneWhoIsBehindOnContributionsOncePerDayPerGroup
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - 'Member · Group Equb'
+    parameters:
+      -
+        in: path
+        name: equbGroup_id
+        description: 'The ID of the equbGroup.'
+        example: 1
+        required: true
+        schema:
+          type: integer
+  /api/admin/equb-payments:
+    get:
+      summary: ''
+      operationId: getApiAdminEqubPayments
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - 'Admin · Contributions'
+    post:
+      summary: ''
+      operationId: postApiAdminEqubPayments
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - 'Admin · Contributions'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                equb_membership_id:
+                  type: string
+                  description: 'The <code>id</code> of an existing record in the equb_memberships table.'
+                  example: architecto
+                amount:
+                  type: number
+                  description: 'Must be at least 0.'
+                  example: 39
+                payment_date:
+                  type: string
+                  description: 'Must be a valid date.'
+                  example: '2026-08-18T20:18:50'
+                payment_method:
+                  type: string
+                  description: ''
+                  example: manual
+                  enum:
+                    - chapa
+                    - offline
+                    - manual
+              required:
+                - equb_membership_id
+                - amount
+                - payment_date
+                - payment_method
+  '/api/admin/equb-payments/{id}':
+    get:
+      summary: ''
+      operationId: getApiAdminEqubPaymentsId
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - 'Admin · Contributions'
+    put:
+      summary: ''
+      operationId: putApiAdminEqubPaymentsId
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - 'Admin · Contributions'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                amount:
+                  type: number
+                  description: 'Must be at least 0.'
+                  example: 27
+                payment_date:
+                  type: string
+                  description: 'Must be a valid date.'
+                  example: '2026-08-18T20:18:50'
+                status:
+                  type: string
+                  description: ''
+                  example: failed
+                  enum:
+                    - pending
+                    - paid
+                    - failed
+    delete:
+      summary: ''
+      operationId: deleteApiAdminEqubPaymentsId
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - 'Admin · Contributions'
+    parameters:
+      -
+        in: path
+        name: id
+        description: 'The ID of the equb payment.'
+        example: 1
+        required: true
+        schema:
+          type: integer
+  '/api/admin/equb-payments/{equbPayment_id}/initiate-chapa':
+    post:
+      summary: 'Initiate Chapa payment for an Equb payment (online).'
+      operationId: initiateChapaPaymentForAnEqubPaymentonline
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - 'Admin · Contributions'
+    parameters:
+      -
+        in: path
+        name: equbPayment_id
+        description: 'The ID of the equbPayment.'
+        example: 1
+        required: true
+        schema:
+          type: integer
+  /api/settings:
+    get:
+      summary: 'Get structured global settings.'
+      operationId: getStructuredGlobalSettings
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      security: []
+  /api/faqs:
+    get:
+      summary: 'Display a listing of active FAQs.'
+      operationId: displayAListingOfActiveFAQs
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      security: []
+  /api/exchange-rates:
+    get:
+      summary: ''
+      operationId: getApiExchangeRates
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      security: []
+  /api/promotions:
+    get:
+      summary: ''
+      operationId: getApiPromotions
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      security: []
+  /api/auth/update:
+    post:
+      summary: 'Update authenticated user information.'
+      operationId: updateAuthenticatedUserInformation
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      requestBody:
+        required: false
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  description: 'Must not be greater than 255 characters.'
+                  example: b
+                  nullable: true
+                email:
+                  type: string
+                  description: 'Must be a valid email address. Must not be greater than 255 characters.'
+                  example: zbailey@example.net
+                  nullable: true
+                password:
+                  type: string
+                  description: 'Must be at least 8 characters. Must not be greater than 255 characters.'
+                  example: '-0pBNvYgxw'
+                  nullable: true
+                city:
+                  type: string
+                  description: 'Must not be greater than 255 characters.'
+                  example: a
+                  nullable: true
+                bank_name:
+                  type: string
+                  description: 'Must not be greater than 255 characters.'
+                  example: 'y'
+                  nullable: true
+                account_number:
+                  type: string
+                  description: 'Must not be greater than 50 characters.'
+                  example: k
+                  nullable: true
+                account_holder_name:
+                  type: string
+                  description: 'Must not be greater than 255 characters.'
+                  example: c
+                  nullable: true
+                profile_picture:
+                  type: string
+                  format: binary
+                  description: 'Must be an image. Must not be greater than 2048 kilobytes.'
+                  nullable: true
+      security: []
+  /api/auth/fcm-token:
+    post:
+      summary: 'Store or update the FCM device token for the authenticated user.'
+      operationId: storeOrUpdateTheFCMDeviceTokenForTheAuthenticatedUser
+      description: "The mobile app should call this once after login and whenever\nthe device token is refreshed by FCM.\n\nIt also automatically re-subscribes the new token to all the user's\nactive Equb group topics."
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                fcm_token:
+                  type: string
+                  description: 'Must not be greater than 255 characters.'
+                  example: b
+              required:
+                - fcm_token
+      security: []
+  /api/admin/users:
+    get:
+      summary: ''
+      operationId: getApiAdminUsers
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                type:
+                  type: string
+                  description: ''
+                  example: staff
+                  enum:
+                    - admin
+                    - staff
+                    - agent
+                    - member
+                  nullable: true
+                status:
+                  type: string
+                  description: ''
+                  example: active
+                  enum:
+                    - active
+                    - inactive
+                  nullable: true
+                per_page:
+                  type: integer
+                  description: 'Must be at least 1. Must not be greater than 100.'
+                  example: 1
+                  nullable: true
+      security: []
+  '/api/admin/users/{user_id}':
+    get:
+      summary: ''
+      operationId: getApiAdminUsersUser_id
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      security: []
+    parameters:
+      -
+        in: path
+        name: user_id
+        description: 'The ID of the user.'
+        example: 1
+        required: true
+        schema:
+          type: integer
+  '/api/admin/users/{user_id}/status':
+    patch:
+      summary: ''
+      operationId: patchApiAdminUsersUser_idStatus
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                is_active:
+                  type: boolean
+                  description: ''
+                  example: false
+              required:
+                - is_active
+      security: []
+    parameters:
+      -
+        in: path
+        name: user_id
+        description: 'The ID of the user.'
+        example: 1
+        required: true
+        schema:
+          type: integer
+  '/api/admin/users/{user_id}/role':
+    patch:
+      summary: ''
+      operationId: patchApiAdminUsersUser_idRole
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                type:
+                  type: string
+                  description: ''
+                  example: admin
+                  enum:
+                    - admin
+                    - staff
+                    - agent
+                    - member
+                full_name:
+                  type: string
+                  description: 'This field is required when <code>type</code> is <code>member</code>. Must not be greater than 255 characters.'
+                  example: b
+                  nullable: true
+              required:
+                - type
+      security: []
+    parameters:
+      -
+        in: path
+        name: user_id
+        description: 'The ID of the user.'
+        example: 1
+        required: true
+        schema:
+          type: integer
+  '/api/admin/users/{user_id}/password':
+    patch:
+      summary: ''
+      operationId: patchApiAdminUsersUser_idPassword
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                password:
+                  type: string
+                  description: 'Must be at least 8 characters.'
+                  example: '|]|{+-'
+              required:
+                - password
+      security: []
+    parameters:
+      -
+        in: path
+        name: user_id
+        description: 'The ID of the user.'
+        example: 1
+        required: true
+        schema:
+          type: integer
+  /api/admin/members:
+    get:
+      summary: ''
+      operationId: getApiAdminMembers
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      security: []
+    post:
+      summary: ''
+      operationId: postApiAdminMembers
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                full_name:
+                  type: string
+                  description: 'Must not be greater than 255 characters.'
+                  example: b
+                phone:
+                  type: string
+                  description: 'Must match the regex /^\+?[1-9]\d{1,14}$/.'
+                  example: '9425593'
+                password:
+                  type: string
+                  description: 'Must be at least 8 characters.'
+                  example: Ygxwmi/
+                referral_code:
+                  type: string
+                  description: 'The <code>referral_code</code> of an existing record in the agents table.'
+                  example: architecto
+                  nullable: true
+                gender:
+                  type: string
+                  description: ''
+                  example: female
+                  enum:
+                    - male
+                    - female
+                  nullable: true
+                date_of_birth:
+                  type: string
+                  description: 'Must be a valid date.'
+                  example: '2026-08-18T20:18:49'
+                  nullable: true
+                address:
+                  type: string
+                  description: 'Must not be greater than 255 characters.'
+                  example: 'n'
+                  nullable: true
+                agent_id:
+                  type: string
+                  description: 'The <code>id</code> of an existing record in the agents table.'
+                  example: null
+                  nullable: true
+                is_active:
+                  type: boolean
+                  description: ''
+                  example: true
+                  nullable: true
+              required:
+                - full_name
+                - phone
+                - password
+      security: []
+  '/api/admin/members/{member_id}':
+    get:
+      summary: ''
+      operationId: getApiAdminMembersMember_id
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      security: []
+    patch:
+      summary: ''
+      operationId: patchApiAdminMembersMember_id
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                full_name:
+                  type: string
+                  description: 'Must not be greater than 255 characters.'
+                  example: b
+                  nullable: true
+                phone:
+                  type: string
+                  description: 'Must match the regex /^\+?[1-9]\d{1,14}$/.'
+                  example: '9425593'
+                  nullable: true
+                gender:
+                  type: string
+                  description: ''
+                  example: female
+                  enum:
+                    - male
+                    - female
+                  nullable: true
+                date_of_birth:
+                  type: string
+                  description: 'Must be a valid date.'
+                  example: '2026-08-18T20:18:49'
+                  nullable: true
+                address:
+                  type: string
+                  description: 'Must not be greater than 255 characters.'
+                  example: 'n'
+                  nullable: true
+                agent_id:
+                  type: string
+                  description: 'The <code>id</code> of an existing record in the agents table.'
+                  example: null
+                  nullable: true
+                is_active:
+                  type: boolean
+                  description: ''
+                  example: true
+                  nullable: true
+      security: []
+    delete:
+      summary: ''
+      operationId: deleteApiAdminMembersMember_id
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      security: []
+    parameters:
+      -
+        in: path
+        name: member_id
+        description: 'The ID of the member.'
+        example: 1
+        required: true
+        schema:
+          type: integer
+  /api/admin/equb-packages:
+    get:
+      summary: ''
+      operationId: getApiAdminEqubPackages
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      security: []
+    post:
+      summary: ''
+      operationId: postApiAdminEqubPackages
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  description: 'Must not be greater than 255 characters.'
+                  example: b
+                type:
+                  type: string
+                  description: ''
+                  example: normal
+                  enum:
+                    - normal
+                    - flexible
+                fixed_contribution_amount:
+                  type: number
+                  description: 'Must be at least 0.'
+                  example: 39
+                  nullable: true
+                min_contribution_amount:
+                  type: number
+                  description: 'Must be at least 0.'
+                  example: 84
+                  nullable: true
+                max_contribution_amount:
+                  type: number
+                  description: 'Must be at least 0.'
+                  example: 12
+                  nullable: true
+                contribution_frequency_days:
+                  type: integer
+                  description: 'Must be at least 1.'
+                  example: 27
+                duration_type:
+                  type: string
+                  description: ''
+                  example: per_member
+                  enum:
+                    - fixed
+                    - per_member
+                duration_days:
+                  type: integer
+                  description: 'Must be at least 1.'
+                  example: 35
+                  nullable: true
+                max_members:
+                  type: integer
+                  description: 'Must be at least 1.'
+                  example: 43
+                  nullable: true
+                terms_content:
+                  type: string
+                  description: ''
+                  example: architecto
+                  nullable: true
+                is_active:
+                  type: boolean
+                  description: ''
+                  example: true
+                  nullable: true
+              required:
+                - name
+                - type
+                - contribution_frequency_days
+                - duration_type
+      security: []
+  '/api/admin/equb-packages/{id}':
+    get:
+      summary: ''
+      operationId: getApiAdminEqubPackagesId
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      security: []
+    put:
+      summary: ''
+      operationId: putApiAdminEqubPackagesId
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  description: 'Must not be greater than 255 characters.'
+                  example: b
+                type:
+                  type: string
+                  description: ''
+                  example: normal
+                  enum:
+                    - normal
+                    - flexible
+                fixed_contribution_amount:
+                  type: number
+                  description: 'Must be at least 0.'
+                  example: 39
+                  nullable: true
+                min_contribution_amount:
+                  type: number
+                  description: 'Must be at least 0.'
+                  example: 84
+                  nullable: true
+                max_contribution_amount:
+                  type: number
+                  description: 'Must be at least 0.'
+                  example: 12
+                  nullable: true
+                contribution_frequency_days:
+                  type: integer
+                  description: 'Must be at least 1.'
+                  example: 27
+                duration_type:
+                  type: string
+                  description: ''
+                  example: fixed
+                  enum:
+                    - fixed
+                    - per_member
+                duration_days:
+                  type: integer
+                  description: 'Must be at least 1.'
+                  example: 35
+                  nullable: true
+                max_members:
+                  type: integer
+                  description: 'Must be at least 1.'
+                  example: 43
+                  nullable: true
+                terms_content:
+                  type: string
+                  description: ''
+                  example: architecto
+                  nullable: true
+                is_active:
+                  type: boolean
+                  description: ''
+                  example: false
+                  nullable: true
+      security: []
+    delete:
+      summary: ''
+      operationId: deleteApiAdminEqubPackagesId
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      security: []
+    parameters:
+      -
+        in: path
+        name: id
+        description: 'The ID of the equb package.'
+        example: 1
+        required: true
+        schema:
+          type: integer
+  /api/admin/equb-groups:
+    get:
+      summary: ''
+      operationId: getApiAdminEqubGroups
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      security: []
+    post:
+      summary: ''
+      operationId: postApiAdminEqubGroups
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                equb_package_id:
+                  type: string
+                  description: 'The <code>id</code> of an existing record in the equb_packages table.'
+                  example: architecto
+                registration_open_at:
+                  type: string
+                  description: 'Must be a valid date.'
+                  example: '2026-08-18T20:18:49'
+                registration_close_at:
+                  type: string
+                  description: 'Must be a valid date. Must be a date after <code>registration_open_at</code>.'
+                  example: '2052-09-10'
+                  nullable: true
+                equb_start_date:
+                  type: string
+                  description: 'Must be a valid date.'
+                  example: '2026-08-18T20:18:49'
+                  nullable: true
+                equb_end_date:
+                  type: string
+                  description: 'Must be a valid date.'
+                  example: '2026-08-18T20:18:49'
+                  nullable: true
+                max_members:
+                  type: integer
+                  description: 'Must be at least 1.'
+                  example: 22
+                  nullable: true
+                status:
+                  type: string
+                  description: ''
+                  example: cancelled
+                  enum:
+                    - draft
+                    - registration
+                    - running
+                    - completed
+                    - cancelled
+                is_locked:
+                  type: boolean
+                  description: ''
+                  example: true
+                  nullable: true
+                draw_type:
+                  type: string
+                  description: ''
+                  example: manual
+                  enum:
+                    - manual
+                    - automatic
+                    - both
+              required:
+                - equb_package_id
+                - registration_open_at
+      security: []
+  '/api/admin/equb-groups/{id}':
+    get:
+      summary: ''
+      operationId: getApiAdminEqubGroupsId
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      security: []
+    put:
+      summary: ''
+      operationId: putApiAdminEqubGroupsId
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                equb_package_id:
+                  type: string
+                  description: 'The <code>id</code> of an existing record in the equb_packages table.'
+                  example: null
+                registration_open_at:
+                  type: string
+                  description: 'Must be a valid date.'
+                  example: '2026-08-18T20:18:49'
+                registration_close_at:
+                  type: string
+                  description: 'Must be a valid date.'
+                  example: '2026-08-18T20:18:49'
+                  nullable: true
+                equb_start_date:
+                  type: string
+                  description: 'Must be a valid date.'
+                  example: '2026-08-18T20:18:49'
+                  nullable: true
+                equb_end_date:
+                  type: string
+                  description: 'Must be a valid date.'
+                  example: '2026-08-18T20:18:49'
+                  nullable: true
+                max_members:
+                  type: integer
+                  description: 'Must be at least 1.'
+                  example: 16
+                  nullable: true
+                status:
+                  type: string
+                  description: ''
+                  example: registration
+                  enum:
+                    - draft
+                    - registration
+                    - running
+                    - completed
+                    - cancelled
+                is_locked:
+                  type: boolean
+                  description: ''
+                  example: false
+                  nullable: true
+                draw_type:
+                  type: string
+                  description: ''
+                  example: manual
+                  enum:
+                    - manual
+                    - automatic
+                    - both
+      security: []
+    delete:
+      summary: ''
+      operationId: deleteApiAdminEqubGroupsId
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      security: []
+    parameters:
+      -
+        in: path
+        name: id
+        description: 'The ID of the equb group.'
+        example: 1
+        required: true
+        schema:
+          type: integer
+  '/api/admin/equb-groups/{equbGroup_id}/open-registration':
+    post:
+      summary: ''
+      operationId: postApiAdminEqubGroupsEqubGroup_idOpenRegistration
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      security: []
+    parameters:
+      -
+        in: path
+        name: equbGroup_id
+        description: 'The ID of the equbGroup.'
+        example: 1
+        required: true
+        schema:
+          type: integer
+  '/api/admin/equb-groups/{equbGroup_id}/close-registration':
+    post:
+      summary: ''
+      operationId: postApiAdminEqubGroupsEqubGroup_idCloseRegistration
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      security: []
+    parameters:
+      -
+        in: path
+        name: equbGroup_id
+        description: 'The ID of the equbGroup.'
+        example: 1
+        required: true
+        schema:
+          type: integer
+  '/api/admin/equb-groups/{equbGroup_id}/start-equb':
+    post:
+      summary: ''
+      operationId: postApiAdminEqubGroupsEqubGroup_idStartEqub
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      security: []
+    parameters:
+      -
+        in: path
+        name: equbGroup_id
+        description: 'The ID of the equbGroup.'
+        example: 1
+        required: true
+        schema:
+          type: integer
+  '/api/admin/equb-groups/{equbGroup_id}/run-draw':
+    post:
+      summary: ''
+      operationId: postApiAdminEqubGroupsEqubGroup_idRunDraw
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      security: []
+    parameters:
+      -
+        in: path
+        name: equbGroup_id
+        description: 'The ID of the equbGroup.'
+        example: 1
+        required: true
+        schema:
+          type: integer
+  /api/admin/equb-memberships:
+    get:
+      summary: ''
+      operationId: getApiAdminEqubMemberships
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      security: []
+    post:
+      summary: ''
+      operationId: postApiAdminEqubMemberships
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                member_id:
+                  type: string
+                  description: 'The <code>id</code> of an existing record in the members table.'
+                  example: architecto
+                equb_group_id:
+                  type: string
+                  description: 'The <code>id</code> of an existing record in the equb_groups table.'
+                  example: architecto
+                contribution_amount:
+                  type: number
+                  description: 'Must be at least 0.'
+                  example: 39
+                contribution_frequency_days:
+                  type: integer
+                  description: 'Must be at least 1.'
+                  example: 67
+                  nullable: true
+              required:
+                - member_id
+                - equb_group_id
+                - contribution_amount
+      security: []
+  '/api/admin/equb-memberships/{id}':
+    get:
+      summary: ''
+      operationId: getApiAdminEqubMembershipsId
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      security: []
+    put:
+      summary: ''
+      operationId: putApiAdminEqubMembershipsId
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                contribution_amount:
+                  type: number
+                  description: 'Must be at least 0.'
+                  example: 27
+                contribution_frequency_days:
+                  type: integer
+                  description: 'Must be at least 1.'
+                  example: 22
+                status:
+                  type: string
+                  description: ''
+                  example: completed
+                  enum:
+                    - active
+                    - completed
+                    - cancelled
+      security: []
+    delete:
+      summary: ''
+      operationId: deleteApiAdminEqubMembershipsId
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      security: []
+    parameters:
+      -
+        in: path
+        name: id
+        description: 'The ID of the equb membership.'
+        example: 1
+        required: true
+        schema:
+          type: integer
+  /api/admin/equb-draws:
+    get:
+      summary: ''
+      operationId: getApiAdminEqubDraws
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      security: []
+  '/api/admin/equb-draws/{equbDraw_id}':
+    get:
+      summary: ''
+      operationId: getApiAdminEqubDrawsEqubDraw_id
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      security: []
+    parameters:
+      -
+        in: path
+        name: equbDraw_id
+        description: 'The ID of the equbDraw.'
+        example: 1
+        required: true
+        schema:
+          type: integer
+  /api/admin/member-equb-groups:
+    get:
+      summary: ''
+      operationId: getApiAdminMemberEqubGroups
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      security: []
+  '/api/admin/member-equb-groups/{equbGroup_id}':
+    get:
+      summary: ''
+      operationId: getApiAdminMemberEqubGroupsEqubGroup_id
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      security: []
+    parameters:
+      -
+        in: path
+        name: equbGroup_id
+        description: 'The ID of the equbGroup.'
+        example: 1
+        required: true
+        schema:
+          type: integer
+  '/api/admin/member-equb-groups/{equbGroup_id}/ledger':
+    get:
+      summary: ''
+      operationId: getApiAdminMemberEqubGroupsEqubGroup_idLedger
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      security: []
+    parameters:
+      -
+        in: path
+        name: equbGroup_id
+        description: 'The ID of the equbGroup.'
+        example: 1
+        required: true
+        schema:
+          type: integer
+  '/api/admin/member-equb-groups/{equbGroup_id}/approve':
+    post:
+      summary: ''
+      operationId: postApiAdminMemberEqubGroupsEqubGroup_idApprove
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      security: []
+    parameters:
+      -
+        in: path
+        name: equbGroup_id
+        description: 'The ID of the equbGroup.'
+        example: 1
+        required: true
+        schema:
+          type: integer
+  '/api/admin/member-equb-groups/{equbGroup_id}/reject':
+    post:
+      summary: ''
+      operationId: postApiAdminMemberEqubGroupsEqubGroup_idReject
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  description: 'Must not be greater than 300 characters.'
+                  example: b
+              required:
+                - reason
+      security: []
+    parameters:
+      -
+        in: path
+        name: equbGroup_id
+        description: 'The ID of the equbGroup.'
+        example: 1
+        required: true
+        schema:
+          type: integer
+  '/api/admin/member-equb-groups/{equbGroup_id}/run-draw':
+    post:
+      summary: "Admin runs a round on the group's behalf (support case)."
+      operationId: adminRunsARoundOnTheGroupsBehalfsupportCase
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                membership_ids:
+                  type: array
+                  description: 'The <code>id</code> of an existing record in the equb_memberships table.'
+                  example:
+                    - 16
+                  items:
+                    type: integer
+                winners_count:
+                  type: integer
+                  description: 'Must be at least 1. Must not be greater than 200.'
+                  example: 22
+                  nullable: true
+      security: []
+    parameters:
+      -
+        in: path
+        name: equbGroup_id
+        description: 'The ID of the equbGroup.'
+        example: 1
+        required: true
+        schema:
+          type: integer
+  /api/agent/dashboard:
+    get:
+      summary: ''
+      operationId: getApiAgentDashboard
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      security: []
+  /api/agent/members:
+    get:
+      summary: ''
+      operationId: getApiAgentMembers
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      security: []
+    post:
+      summary: ''
+      operationId: postApiAgentMembers
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                full_name:
+                  type: string
+                  description: 'Must not be greater than 255 characters.'
+                  example: b
+                phone:
+                  type: string
+                  description: 'Must match the regex /^\+?[1-9]\d{1,14}$/.'
+                  example: '9425593'
+                email:
+                  type: string
+                  description: 'Must be a valid email address. Must not be greater than 255 characters.'
+                  example: lafayette.considine@example.com
+                  nullable: true
+                password:
+                  type: string
+                  description: 'Must be at least 8 characters.'
+                  example: 'i/#iw/kXaz<m'
+                  nullable: true
+                gender:
+                  type: string
+                  description: ''
+                  example: female
+                  enum:
+                    - male
+                    - female
+                  nullable: true
+                date_of_birth:
+                  type: string
+                  description: 'Must be a valid date.'
+                  example: '2026-08-18T20:18:50'
+                  nullable: true
+                address:
+                  type: string
+                  description: 'Must not be greater than 255 characters.'
+                  example: w
+                  nullable: true
+              required:
+                - full_name
+                - phone
+      security: []
+  /api/agent/payouts:
+    get:
+      summary: ''
+      operationId: getApiAgentPayouts
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      security: []
+  /api/agent/payments:
+    get:
+      summary: ''
+      operationId: getApiAgentPayments
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      security: []
+    post:
+      summary: ''
+      operationId: postApiAgentPayments
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                amount:
+                  type: number
+                  description: 'Must be at least 1.'
+                  example: 16
+                bank_name:
+                  type: string
+                  description: 'Must not be greater than 255 characters.'
+                  example: 'n'
+                  nullable: true
+                account_number:
+                  type: string
+                  description: 'Must not be greater than 50 characters.'
+                  example: g
+                  nullable: true
+                account_holder_name:
+                  type: string
+                  description: 'Must not be greater than 255 characters.'
+                  example: z
+                  nullable: true
+                status:
+                  type: string
+                  description: ''
+                  example: failed
+                  enum:
+                    - completed
+                    - pending
+                    - failed
+                  nullable: true
+                paid_at:
+                  type: string
+                  description: 'Must be a valid date.'
+                  example: '2026-08-18T20:18:50'
+                  nullable: true
+              required:
+                - amount
+      security: []
+  /api/agent/commissions:
+    get:
+      summary: ''
+      operationId: getApiAgentCommissions
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      security: []
+  '/api/member/agents/{referralCode}':
+    get:
+      summary: ''
+      operationId: getApiMemberAgentsReferralCode
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      security: []
+    parameters:
+      -
+        in: path
+        name: referralCode
+        description: ''
+        example: 16
+        required: true
+        schema:
+          type: integer
+  /api/member/payments:
+    post:
+      summary: ''
+      operationId: postApiMemberPayments
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                amount:
+                  type: number
+                  description: 'Must be at least 1.'
+                  example: 16
+                status:
+                  type: string
+                  description: ''
+                  example: failed
+                  enum:
+                    - completed
+                    - pending
+                    - failed
+                  nullable: true
+                paid_at:
+                  type: string
+                  description: 'Must be a valid date.'
+                  example: '2026-08-18T20:18:50'
+                  nullable: true
+              required:
+                - amount
+      security: []
+  /api/member/equb-packages:
+    get:
+      summary: 'List active Equb packages (for mobile browse/join).'
+      operationId: listActiveEqubPackagesforMobileBrowsejoin
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      security: []
+  '/api/member/equb-packages/{equbPackage_id}':
+    get:
+      summary: 'Show a single package.'
+      operationId: showASinglePackage
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      security: []
+    parameters:
+      -
+        in: path
+        name: equbPackage_id
+        description: 'The ID of the equbPackage.'
+        example: 1
+        required: true
+        schema:
+          type: integer
+  /api/member/equb-groups:
+    get:
+      summary: 'List Equb groups (optionally filter by status: registration, running).'
+      operationId: listEqubGroupsoptionallyFilterByStatusRegistrationRunning
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      security: []
+  '/api/member/equb-groups/{equbGroup_id}':
+    get:
+      summary: 'Show a single group with package.'
+      operationId: showASingleGroupWithPackage
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      security: []
+    parameters:
+      -
+        in: path
+        name: equbGroup_id
+        description: 'The ID of the equbGroup.'
+        example: 1
+        required: true
+        schema:
+          type: integer
+  /api/member/equb-draws:
+    get:
+      summary: 'List draws (for my groups or by equb_group_id).'
+      operationId: listDrawsforMyGroupsOrByEqubGroupId
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      security: []
+  '/api/member/equb-draws/{equbDraw_id}':
+    get:
+      summary: 'Show a single draw.'
+      operationId: showASingleDraw
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      security: []
+    parameters:
+      -
+        in: path
+        name: equbDraw_id
+        description: 'The ID of the equbDraw.'
+        example: 1
+        required: true
+        schema:
+          type: integer
+  /api/member/member-lookup:
+    post:
+      summary: 'POST /member/member-lookup — exact phone or referral code.'
+      operationId: pOSTmembermemberLookupExactPhoneOrReferralCode
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                phone:
+                  type: string
+                  description: 'This field is required when <code>referral_code</code> is not present. Must not be greater than 20 characters.'
+                  example: bngzmiyvdljnikhw
+                  nullable: true
+                referral_code:
+                  type: string
+                  description: 'This field is required when <code>phone</code> is not present. Must not be greater than 20 characters.'
+                  example: aykcmyuwpwlvqwrs
+                  nullable: true
+      security: []
+  /api/member/member-search:
+    get:
+      summary: 'GET|POST /member/member-search?q=.'
+      operationId: gETPOSTmembermemberSearchq
+      description: "..\n\nMatches on member name, user name or phone. Phone matching uses the last\n8 digits so 09xxxxxxxx finds someone stored as +2519xxxxxxxx."
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      security: []
+    post:
+      summary: 'GET|POST /member/member-search?q=.'
+      operationId: gETPOSTmembermemberSearchq
+      description: "..\n\nMatches on member name, user name or phone. Phone matching uses the last\n8 digits so 09xxxxxxxx finds someone stored as +2519xxxxxxxx."
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      security: []
+  /api/member/equb-invitations:
+    get:
+      summary: 'Invitations waiting for me.'
+      operationId: invitationsWaitingForMe
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      security: []
+  '/api/member/equb-invitations/{invitation_id}/accept':
+    post:
+      summary: ''
+      operationId: postApiMemberEqubInvitationsInvitation_idAccept
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      security: []
+    parameters:
+      -
+        in: path
+        name: invitation_id
+        description: 'The ID of the invitation.'
+        example: 1
+        required: true
+        schema:
+          type: integer
+  '/api/member/equb-invitations/{invitation_id}/decline':
+    post:
+      summary: ''
+      operationId: postApiMemberEqubInvitationsInvitation_idDecline
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      security: []
+    parameters:
+      -
+        in: path
+        name: invitation_id
+        description: 'The ID of the invitation.'
+        example: 1
+        required: true
+        schema:
+          type: integer
+  '/api/member/equb-invitations/{invitation_id}':
+    delete:
+      summary: 'The inviter withdraws an invitation.'
+      operationId: theInviterWithdrawsAnInvitation
+      description: ''
+      parameters: []
+      responses: {  }
+      tags:
+        - Endpoints
+      security: []
+    parameters:
+      -
+        in: path
+        name: invitation_id
+        description: 'The ID of the invitation.'
+        example: 1
+        required: true
+        schema:
+          type: integer

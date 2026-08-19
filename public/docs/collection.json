@@ -1,0 +1,3825 @@
+{
+    "variable": [
+        {
+            "id": "baseUrl",
+            "key": "baseUrl",
+            "type": "string",
+            "name": "string",
+            "value": "https:\/\/cms.niya-et.com"
+        }
+    ],
+    "info": {
+        "name": "Niya Umrah Equb API",
+        "_postman_id": "b154e7b1-5134-493c-ac5d-8f8f51889085",
+        "description": "REST API for the Niya Umrah Equb digital rotating-savings platform. Covers member participation, private Group Equbs, contribution collection and settlement, the agent network, and platform administration.",
+        "schema": "https:\/\/schema.getpostman.com\/json\/collection\/v2.1.0\/collection.json",
+        "version": "2.1.0"
+    },
+    "item": [
+        {
+            "name": "Service",
+            "description": "",
+            "item": [
+                {
+                    "name": "Service index",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api"
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "Confirms the caller has reached the correct deployment and points them at the\nspecification. Use this as a connectivity smoke test during integration setup:\nit touches no dependencies, so a 200 here means only that the application is\nserving. Use the health check to confirm the dependencies behind it.",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": [
+                        {
+                            "header": [],
+                            "code": 200,
+                            "body": "{\n  \"status\": \"success\",\n  \"service\": \"Niya Umrah Equb API\",\n  \"version\": \"2.1\",\n  \"documentation\": \"https:\/\/niya-et.com\/developers\",\n  \"support\": \"support@niya-et.com\",\n  \"server_time\": \"2026-08-18T09:12:44+00:00\",\n  \"resources\": {\n    \"health\": \"https:\/\/cms.niya-et.com\/api\/health\",\n    \"settings\": \"https:\/\/cms.niya-et.com\/api\/settings\",\n    \"login\": \"https:\/\/cms.niya-et.com\/api\/auth\/login\"\n  }\n}",
+                            "name": ""
+                        }
+                    ]
+                },
+                {
+                    "name": "Health check",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/health",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/health"
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "Dependency probe for uptime monitoring and partner smoke tests. Returns 200 while\nevery dependency responds and 503 as soon as one does not, so a monitor can alert\non the status code alone.\n\nFailure detail is logged server-side and never returned: this endpoint is public,\nand a connection string in an error message is a disclosure.",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": [
+                        {
+                            "header": [],
+                            "code": 200,
+                            "body": "{\n  \"status\": \"success\",\n  \"health\": \"ok\",\n  \"checks\": { \"database\": \"ok\", \"cache\": \"ok\" },\n  \"version\": \"2.1\",\n  \"server_time\": \"2026-08-18T09:12:44+00:00\"\n}",
+                            "name": ""
+                        },
+                        {
+                            "header": [],
+                            "code": 503,
+                            "body": "{\n  \"status\": \"error\",\n  \"health\": \"degraded\",\n  \"checks\": { \"database\": \"unavailable\", \"cache\": \"ok\" },\n  \"version\": \"2.1\",\n  \"server_time\": \"2026-08-18T09:12:44+00:00\"\n}",
+                            "name": ""
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "Authentication",
+            "description": "",
+            "item": [
+                {
+                    "name": "Send OTP for phone verification.",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/auth\/send-otp",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/auth\/send-otp"
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\"phone\":\"9425593\"}"
+                        },
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "POST api\/auth\/check-user",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/auth\/check-user",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/auth\/check-user"
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\"phone\":\"9425593\"}"
+                        },
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Verify OTP code.",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/auth\/verify-otp",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/auth\/verify-otp"
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\"phone\":\"9425593\",\"verificationId\":\"architecto\",\"code\":\"5642\"}"
+                        },
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Register a new user.",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/auth\/register",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/auth\/register"
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\"type\":\"member\",\"full_name\":\"b\",\"phone\":\"9425593\",\"email\":\"lafayette.considine@example.com\",\"city\":\"a\",\"password\":\"\\\/#iw\\\/kXaz\",\"bank_name\":\"v\",\"account_number\":\"q\",\"account_holder_name\":\"w\",\"referral_code\":\"architecto\"}"
+                        },
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Authenticate user and return JWT token.",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/auth\/login",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/auth\/login"
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\"phone\":\"9425593\",\"password\":\"|]|{+-\"}"
+                        },
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Reset password using OTP.",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/auth\/reset-password",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/auth\/reset-password"
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\"phone\":\"9425593\",\"password\":\"Ygxwmi\\\/\"}"
+                        },
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "POST api\/auth\/delete-account-by-phone",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/auth\/delete-account-by-phone",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/auth\/delete-account-by-phone"
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\"phone\":\"9425593\"}"
+                        },
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Refresh JWT token.",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/auth\/refresh",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/auth\/refresh"
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get authenticated user information.",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/auth\/me",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/auth\/me"
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Logout user by invalidating token.",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/auth\/logout",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/auth\/logout"
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "POST api\/auth\/delete-account",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/auth\/delete-account",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/auth\/delete-account"
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                }
+            ]
+        },
+        {
+            "name": "Member \u00b7 Memberships",
+            "description": "",
+            "item": [
+                {
+                    "name": "List current user's Equb memberships.",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/member\/equb-memberships",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/member\/equb-memberships"
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": ""
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Join an Equb group (create membership).",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/member\/equb-memberships",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/member\/equb-memberships"
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\"equb_group_id\":\"architecto\"}"
+                        },
+                        "description": "After joining, subscribe the device's FCM token to the group draw topic\nso the member automatically receives draw push notifications."
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Show one of my memberships.",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/member\/equb-memberships\/:equbMembership_id",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/member\/equb-memberships\/:equbMembership_id",
+                            "variable": [
+                                {
+                                    "id": "equbMembership_id",
+                                    "key": "equbMembership_id",
+                                    "value": "1",
+                                    "description": "The ID of the equbMembership."
+                                }
+                            ]
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": ""
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Leave an Equb group if no payments have been made.",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/member\/equb-memberships\/:equbMembership_id\/leave",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/member\/equb-memberships\/:equbMembership_id\/leave",
+                            "variable": [
+                                {
+                                    "id": "equbMembership_id",
+                                    "key": "equbMembership_id",
+                                    "value": "1",
+                                    "description": "The ID of the equbMembership."
+                                }
+                            ]
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": ""
+                    },
+                    "response": []
+                }
+            ]
+        },
+        {
+            "name": "Member \u00b7 Contributions",
+            "description": "",
+            "item": [
+                {
+                    "name": "List payments for current user's memberships.",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/member\/equb-payments",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/member\/equb-payments"
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": ""
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Create a payment (offline) or initiate Chapa (online).",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/member\/equb-payments",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/member\/equb-payments"
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\"equb_membership_id\":\"architecto\",\"amount\":39,\"payment_date\":\"2026-08-18T20:18:51\",\"payment_method\":\"offline\"}"
+                        },
+                        "description": ""
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Settle several contributions in one go.",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/member\/equb-payments\/batch",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/member\/equb-payments\/batch"
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\"equb_membership_ids\":[16],\"payment_date\":\"2026-08-18T20:18:51\",\"payment_method\":\"architecto\"}"
+                        },
+                        "description": "A member who holds places for \"My Responsibility People\" owes one\ncontribution per place, every round. Each place keeps its own payment\nrow \u2014 the ledger, the schedule and draw eligibility all count per place\n\u2014 but the member should go through checkout once, for the total.\n\nThe rows are created up front and tied together by batch_reference; the\ngateway sees a single charge against that reference, and the webhook\nmarks every row carrying it as paid together."
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Show a single payment (only if it belongs to current user's membership).",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/member\/equb-payments\/:equbPayment_id",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/member\/equb-payments\/:equbPayment_id",
+                            "variable": [
+                                {
+                                    "id": "equbPayment_id",
+                                    "key": "equbPayment_id",
+                                    "value": "1",
+                                    "description": "The ID of the equbPayment."
+                                }
+                            ]
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": ""
+                    },
+                    "response": []
+                }
+            ]
+        },
+        {
+            "name": "Member \u00b7 Group Equb",
+            "description": "",
+            "item": [
+                {
+                    "name": "Platform Equbs a member can build a Group Equb inside.",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/member\/joinable-equb-groups",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/member\/joinable-equb-groups"
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "The contribution per person comes from here, never from the member."
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Groups I created or was invited into.",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/member\/my-equb-groups",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/member\/my-equb-groups"
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": ""
+                    },
+                    "response": []
+                },
+                {
+                    "name": "POST api\/member\/my-equb-groups",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/member\/my-equb-groups",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/member\/my-equb-groups"
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\"parent_equb_group_id\":16,\"name\":\"n\",\"description\":\"Animi quos velit et fugiat.\",\"allow_member_invites\":false,\"invite_member_ids\":[16],\"invite_phones\":[\"ngzmiyvdljnikhwa\"],\"responsibility_people\":[{\"name\":\"y\",\"phone\":\"kcmyuwpwlvqwrsit\",\"relation\":\"c\",\"note\":\"p\"}]}"
+                        },
+                        "description": ""
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Ask to join a group using a shared invite code.",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/member\/my-equb-groups\/join-by-code",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/member\/my-equb-groups\/join-by-code"
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\"invite_code\":\"bngz\"}"
+                        },
+                        "description": ""
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Preview a group from a shared invite code, before asking to join.",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/member\/my-equb-groups\/by-code\/:code",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/member\/my-equb-groups\/by-code\/:code",
+                            "variable": [
+                                {
+                                    "id": "code",
+                                    "key": "code",
+                                    "value": "architecto",
+                                    "description": ""
+                                }
+                            ]
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": ""
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Pending join requests for a group the caller owns.",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/member\/my-equb-groups\/:equbGroup_id\/requests",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/member\/my-equb-groups\/:equbGroup_id\/requests",
+                            "variable": [
+                                {
+                                    "id": "equbGroup_id",
+                                    "key": "equbGroup_id",
+                                    "value": "1",
+                                    "description": "The ID of the equbGroup."
+                                }
+                            ]
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": ""
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Owner approves or declines a request.",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/member\/my-equb-groups\/:equbGroup_id\/requests\/:invitation_id",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/member\/my-equb-groups\/:equbGroup_id\/requests\/:invitation_id",
+                            "variable": [
+                                {
+                                    "id": "equbGroup_id",
+                                    "key": "equbGroup_id",
+                                    "value": "1",
+                                    "description": "The ID of the equbGroup."
+                                },
+                                {
+                                    "id": "invitation_id",
+                                    "key": "invitation_id",
+                                    "value": "1",
+                                    "description": "The ID of the invitation."
+                                }
+                            ]
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": ""
+                    },
+                    "response": []
+                },
+                {
+                    "name": "The people being carried in this group.",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/member\/my-equb-groups\/:equbGroup_id\/responsibility-people",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/member\/my-equb-groups\/:equbGroup_id\/responsibility-people",
+                            "variable": [
+                                {
+                                    "id": "equbGroup_id",
+                                    "key": "equbGroup_id",
+                                    "value": "1",
+                                    "description": "The ID of the equbGroup."
+                                }
+                            ]
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "The creator sees the whole circle's seats, because they are answerable\nfor the group's collection rate. Everyone else sees only their own \u2014 who\nelse's child is in the Equb is not their business."
+                    },
+                    "response": []
+                },
+                {
+                    "name": "POST api\/member\/my-equb-groups\/{equbGroup_id}\/responsibility-people",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/member\/my-equb-groups\/:equbGroup_id\/responsibility-people",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/member\/my-equb-groups\/:equbGroup_id\/responsibility-people",
+                            "variable": [
+                                {
+                                    "id": "equbGroup_id",
+                                    "key": "equbGroup_id",
+                                    "value": "1",
+                                    "description": "The ID of the equbGroup."
+                                }
+                            ]
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\"name\":\"b\",\"phone\":\"ngzmiyvdljnikhwa\",\"relation\":\"y\",\"note\":\"k\"}"
+                        },
+                        "description": ""
+                    },
+                    "response": []
+                },
+                {
+                    "name": "PATCH api\/member\/my-equb-groups\/{equbGroup_id}\/responsibility-people\/{equbMembership_id}",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/member\/my-equb-groups\/:equbGroup_id\/responsibility-people\/:equbMembership_id",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/member\/my-equb-groups\/:equbGroup_id\/responsibility-people\/:equbMembership_id",
+                            "variable": [
+                                {
+                                    "id": "equbGroup_id",
+                                    "key": "equbGroup_id",
+                                    "value": "1",
+                                    "description": "The ID of the equbGroup."
+                                },
+                                {
+                                    "id": "equbMembership_id",
+                                    "key": "equbMembership_id",
+                                    "value": "1",
+                                    "description": "The ID of the equbMembership."
+                                }
+                            ]
+                        },
+                        "method": "PATCH",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\"name\":\"b\",\"phone\":\"ngzmiyvdljnikhwa\",\"relation\":\"y\",\"note\":\"k\"}"
+                        },
+                        "description": ""
+                    },
+                    "response": []
+                },
+                {
+                    "name": "DELETE api\/member\/my-equb-groups\/{equbGroup_id}\/responsibility-people\/{equbMembership_id}",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/member\/my-equb-groups\/:equbGroup_id\/responsibility-people\/:equbMembership_id",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/member\/my-equb-groups\/:equbGroup_id\/responsibility-people\/:equbMembership_id",
+                            "variable": [
+                                {
+                                    "id": "equbGroup_id",
+                                    "key": "equbGroup_id",
+                                    "value": "1",
+                                    "description": "The ID of the equbGroup."
+                                },
+                                {
+                                    "id": "equbMembership_id",
+                                    "key": "equbMembership_id",
+                                    "value": "1",
+                                    "description": "The ID of the equbMembership."
+                                }
+                            ]
+                        },
+                        "method": "DELETE",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": ""
+                    },
+                    "response": []
+                },
+                {
+                    "name": "GET api\/member\/my-equb-groups\/{equbGroup_id}",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/member\/my-equb-groups\/:equbGroup_id",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/member\/my-equb-groups\/:equbGroup_id",
+                            "variable": [
+                                {
+                                    "id": "equbGroup_id",
+                                    "key": "equbGroup_id",
+                                    "value": "1",
+                                    "description": "The ID of the equbGroup."
+                                }
+                            ]
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": ""
+                    },
+                    "response": []
+                },
+                {
+                    "name": "The paid \/ unpaid dashboard for the whole circle.",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/member\/my-equb-groups\/:equbGroup_id\/ledger",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/member\/my-equb-groups\/:equbGroup_id\/ledger",
+                            "variable": [
+                                {
+                                    "id": "equbGroup_id",
+                                    "key": "equbGroup_id",
+                                    "value": "1",
+                                    "description": "The ID of the equbGroup."
+                                }
+                            ]
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": ""
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Invitations the owner has sent for this group.",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/member\/my-equb-groups\/:equbGroup_id\/invitations",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/member\/my-equb-groups\/:equbGroup_id\/invitations",
+                            "variable": [
+                                {
+                                    "id": "equbGroup_id",
+                                    "key": "equbGroup_id",
+                                    "value": "1",
+                                    "description": "The ID of the equbGroup."
+                                }
+                            ]
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": ""
+                    },
+                    "response": []
+                },
+                {
+                    "name": "POST api\/member\/my-equb-groups\/{equbGroup_id}\/invitations",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/member\/my-equb-groups\/:equbGroup_id\/invitations",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/member\/my-equb-groups\/:equbGroup_id\/invitations",
+                            "variable": [
+                                {
+                                    "id": "equbGroup_id",
+                                    "key": "equbGroup_id",
+                                    "value": "1",
+                                    "description": "The ID of the equbGroup."
+                                }
+                            ]
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\"member_ids\":[16],\"phones\":[\"ngzmiyvdljnikhwa\"],\"message\":\"y\"}"
+                        },
+                        "description": ""
+                    },
+                    "response": []
+                },
+                {
+                    "name": "DELETE api\/member\/my-equb-groups\/{equbGroup_id}\/members\/{equbMembership_id}",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/member\/my-equb-groups\/:equbGroup_id\/members\/:equbMembership_id",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/member\/my-equb-groups\/:equbGroup_id\/members\/:equbMembership_id",
+                            "variable": [
+                                {
+                                    "id": "equbGroup_id",
+                                    "key": "equbGroup_id",
+                                    "value": "1",
+                                    "description": "The ID of the equbGroup."
+                                },
+                                {
+                                    "id": "equbMembership_id",
+                                    "key": "equbMembership_id",
+                                    "value": "1",
+                                    "description": "The ID of the equbMembership."
+                                }
+                            ]
+                        },
+                        "method": "DELETE",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": ""
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Preview the winner-group split before starting.",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/member\/my-equb-groups\/:equbGroup_id\/split-plan",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/member\/my-equb-groups\/:equbGroup_id\/split-plan",
+                            "variable": [
+                                {
+                                    "id": "equbGroup_id",
+                                    "key": "equbGroup_id",
+                                    "value": "1",
+                                    "description": "The ID of the equbGroup."
+                                }
+                            ]
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": ""
+                    },
+                    "response": []
+                },
+                {
+                    "name": "POST api\/member\/my-equb-groups\/{equbGroup_id}\/start",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/member\/my-equb-groups\/:equbGroup_id\/start",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/member\/my-equb-groups\/:equbGroup_id\/start",
+                            "variable": [
+                                {
+                                    "id": "equbGroup_id",
+                                    "key": "equbGroup_id",
+                                    "value": "1",
+                                    "description": "The ID of the equbGroup."
+                                }
+                            ]
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": ""
+                    },
+                    "response": []
+                },
+                {
+                    "name": "POST api\/member\/my-equb-groups\/{equbGroup_id}\/cancel",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/member\/my-equb-groups\/:equbGroup_id\/cancel",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/member\/my-equb-groups\/:equbGroup_id\/cancel",
+                            "variable": [
+                                {
+                                    "id": "equbGroup_id",
+                                    "key": "equbGroup_id",
+                                    "value": "1",
+                                    "description": "The ID of the equbGroup."
+                                }
+                            ]
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": ""
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Draw history: every round with its full winner group.",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/member\/my-equb-groups\/:equbGroup_id\/draws",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/member\/my-equb-groups\/:equbGroup_id\/draws",
+                            "variable": [
+                                {
+                                    "id": "equbGroup_id",
+                                    "key": "equbGroup_id",
+                                    "value": "1",
+                                    "description": "The ID of the equbGroup."
+                                }
+                            ]
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": ""
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Run one round: automatic winner group, or a hand-picked one.",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/member\/my-equb-groups\/:equbGroup_id\/draws",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/member\/my-equb-groups\/:equbGroup_id\/draws",
+                            "variable": [
+                                {
+                                    "id": "equbGroup_id",
+                                    "key": "equbGroup_id",
+                                    "value": "1",
+                                    "description": "The ID of the equbGroup."
+                                }
+                            ]
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\"membership_ids\":[16],\"winners_count\":22}"
+                        },
+                        "description": ""
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Text everyone who is behind on contributions. Once per day per group.",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/member\/my-equb-groups\/:equbGroup_id\/remind-unpaid",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/member\/my-equb-groups\/:equbGroup_id\/remind-unpaid",
+                            "variable": [
+                                {
+                                    "id": "equbGroup_id",
+                                    "key": "equbGroup_id",
+                                    "value": "1",
+                                    "description": "The ID of the equbGroup."
+                                }
+                            ]
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": ""
+                    },
+                    "response": []
+                }
+            ]
+        },
+        {
+            "name": "Admin \u00b7 Contributions",
+            "description": "",
+            "item": [
+                {
+                    "name": "GET api\/admin\/equb-payments",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/admin\/equb-payments",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/admin\/equb-payments"
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": ""
+                    },
+                    "response": []
+                },
+                {
+                    "name": "POST api\/admin\/equb-payments",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/admin\/equb-payments",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/admin\/equb-payments"
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\"equb_membership_id\":\"architecto\",\"amount\":39,\"payment_date\":\"2026-08-18T20:18:50\",\"payment_method\":\"manual\"}"
+                        },
+                        "description": ""
+                    },
+                    "response": []
+                },
+                {
+                    "name": "GET api\/admin\/equb-payments\/{id}",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/admin\/equb-payments\/:id",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/admin\/equb-payments\/:id",
+                            "variable": [
+                                {
+                                    "id": "id",
+                                    "key": "id",
+                                    "value": "1",
+                                    "description": "The ID of the equb payment."
+                                }
+                            ]
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": ""
+                    },
+                    "response": []
+                },
+                {
+                    "name": "PUT api\/admin\/equb-payments\/{id}",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/admin\/equb-payments\/:id",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/admin\/equb-payments\/:id",
+                            "variable": [
+                                {
+                                    "id": "id",
+                                    "key": "id",
+                                    "value": "1",
+                                    "description": "The ID of the equb payment."
+                                }
+                            ]
+                        },
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\"amount\":27,\"payment_date\":\"2026-08-18T20:18:50\",\"status\":\"failed\"}"
+                        },
+                        "description": ""
+                    },
+                    "response": []
+                },
+                {
+                    "name": "DELETE api\/admin\/equb-payments\/{id}",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/admin\/equb-payments\/:id",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/admin\/equb-payments\/:id",
+                            "variable": [
+                                {
+                                    "id": "id",
+                                    "key": "id",
+                                    "value": "1",
+                                    "description": "The ID of the equb payment."
+                                }
+                            ]
+                        },
+                        "method": "DELETE",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": ""
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Initiate Chapa payment for an Equb payment (online).",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/admin\/equb-payments\/:equbPayment_id\/initiate-chapa",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/admin\/equb-payments\/:equbPayment_id\/initiate-chapa",
+                            "variable": [
+                                {
+                                    "id": "equbPayment_id",
+                                    "key": "equbPayment_id",
+                                    "value": "1",
+                                    "description": "The ID of the equbPayment."
+                                }
+                            ]
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": ""
+                    },
+                    "response": []
+                }
+            ]
+        },
+        {
+            "name": "Endpoints",
+            "description": "",
+            "item": [
+                {
+                    "name": "Get structured global settings.",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/settings",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/settings"
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Display a listing of active FAQs.",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/faqs",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/faqs"
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "GET api\/exchange-rates",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/exchange-rates",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/exchange-rates"
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "GET api\/promotions",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/promotions",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/promotions"
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Update authenticated user information.",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/auth\/update",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/auth\/update"
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "multipart\/form-data"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "formdata",
+                            "formdata": [
+                                {
+                                    "key": "name",
+                                    "value": "b",
+                                    "type": "text",
+                                    "description": "Must not be greater than 255 characters."
+                                },
+                                {
+                                    "key": "email",
+                                    "value": "zbailey@example.net",
+                                    "type": "text",
+                                    "description": "Must be a valid email address. Must not be greater than 255 characters."
+                                },
+                                {
+                                    "key": "password",
+                                    "value": "-0pBNvYgxw",
+                                    "type": "text",
+                                    "description": "Must be at least 8 characters. Must not be greater than 255 characters."
+                                },
+                                {
+                                    "key": "city",
+                                    "value": "a",
+                                    "type": "text",
+                                    "description": "Must not be greater than 255 characters."
+                                },
+                                {
+                                    "key": "bank_name",
+                                    "value": "y",
+                                    "type": "text",
+                                    "description": "Must not be greater than 255 characters."
+                                },
+                                {
+                                    "key": "account_number",
+                                    "value": "k",
+                                    "type": "text",
+                                    "description": "Must not be greater than 50 characters."
+                                },
+                                {
+                                    "key": "account_holder_name",
+                                    "value": "c",
+                                    "type": "text",
+                                    "description": "Must not be greater than 255 characters."
+                                },
+                                {
+                                    "key": "profile_picture",
+                                    "src": [],
+                                    "type": "file"
+                                }
+                            ]
+                        },
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Store or update the FCM device token for the authenticated user.",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/auth\/fcm-token",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/auth\/fcm-token"
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\"fcm_token\":\"b\"}"
+                        },
+                        "description": "The mobile app should call this once after login and whenever\nthe device token is refreshed by FCM.\n\nIt also automatically re-subscribes the new token to all the user's\nactive Equb group topics.",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "GET api\/admin\/users",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/admin\/users",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/admin\/users"
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\"type\":\"staff\",\"status\":\"active\",\"per_page\":1}"
+                        },
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "GET api\/admin\/users\/{user_id}",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/admin\/users\/:user_id",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/admin\/users\/:user_id",
+                            "variable": [
+                                {
+                                    "id": "user_id",
+                                    "key": "user_id",
+                                    "value": "1",
+                                    "description": "The ID of the user."
+                                }
+                            ]
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "PATCH api\/admin\/users\/{user_id}\/status",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/admin\/users\/:user_id\/status",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/admin\/users\/:user_id\/status",
+                            "variable": [
+                                {
+                                    "id": "user_id",
+                                    "key": "user_id",
+                                    "value": "1",
+                                    "description": "The ID of the user."
+                                }
+                            ]
+                        },
+                        "method": "PATCH",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\"is_active\":false}"
+                        },
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "PATCH api\/admin\/users\/{user_id}\/role",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/admin\/users\/:user_id\/role",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/admin\/users\/:user_id\/role",
+                            "variable": [
+                                {
+                                    "id": "user_id",
+                                    "key": "user_id",
+                                    "value": "1",
+                                    "description": "The ID of the user."
+                                }
+                            ]
+                        },
+                        "method": "PATCH",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\"type\":\"admin\",\"full_name\":\"b\"}"
+                        },
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "PATCH api\/admin\/users\/{user_id}\/password",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/admin\/users\/:user_id\/password",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/admin\/users\/:user_id\/password",
+                            "variable": [
+                                {
+                                    "id": "user_id",
+                                    "key": "user_id",
+                                    "value": "1",
+                                    "description": "The ID of the user."
+                                }
+                            ]
+                        },
+                        "method": "PATCH",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\"password\":\"|]|{+-\"}"
+                        },
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "GET api\/admin\/members",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/admin\/members",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/admin\/members"
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "POST api\/admin\/members",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/admin\/members",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/admin\/members"
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\"full_name\":\"b\",\"phone\":\"9425593\",\"password\":\"Ygxwmi\\\/\",\"referral_code\":\"architecto\",\"gender\":\"female\",\"date_of_birth\":\"2026-08-18T20:18:49\",\"address\":\"n\",\"is_active\":true}"
+                        },
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "GET api\/admin\/members\/{member_id}",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/admin\/members\/:member_id",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/admin\/members\/:member_id",
+                            "variable": [
+                                {
+                                    "id": "member_id",
+                                    "key": "member_id",
+                                    "value": "1",
+                                    "description": "The ID of the member."
+                                }
+                            ]
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "PATCH api\/admin\/members\/{member_id}",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/admin\/members\/:member_id",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/admin\/members\/:member_id",
+                            "variable": [
+                                {
+                                    "id": "member_id",
+                                    "key": "member_id",
+                                    "value": "1",
+                                    "description": "The ID of the member."
+                                }
+                            ]
+                        },
+                        "method": "PATCH",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\"full_name\":\"b\",\"phone\":\"9425593\",\"gender\":\"female\",\"date_of_birth\":\"2026-08-18T20:18:49\",\"address\":\"n\",\"is_active\":true}"
+                        },
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "DELETE api\/admin\/members\/{member_id}",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/admin\/members\/:member_id",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/admin\/members\/:member_id",
+                            "variable": [
+                                {
+                                    "id": "member_id",
+                                    "key": "member_id",
+                                    "value": "1",
+                                    "description": "The ID of the member."
+                                }
+                            ]
+                        },
+                        "method": "DELETE",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "GET api\/admin\/equb-packages",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/admin\/equb-packages",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/admin\/equb-packages"
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "POST api\/admin\/equb-packages",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/admin\/equb-packages",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/admin\/equb-packages"
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\"name\":\"b\",\"type\":\"normal\",\"fixed_contribution_amount\":39,\"min_contribution_amount\":84,\"max_contribution_amount\":12,\"contribution_frequency_days\":27,\"duration_type\":\"per_member\",\"duration_days\":35,\"max_members\":43,\"terms_content\":\"architecto\",\"is_active\":true}"
+                        },
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "GET api\/admin\/equb-packages\/{id}",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/admin\/equb-packages\/:id",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/admin\/equb-packages\/:id",
+                            "variable": [
+                                {
+                                    "id": "id",
+                                    "key": "id",
+                                    "value": "1",
+                                    "description": "The ID of the equb package."
+                                }
+                            ]
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "PUT api\/admin\/equb-packages\/{id}",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/admin\/equb-packages\/:id",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/admin\/equb-packages\/:id",
+                            "variable": [
+                                {
+                                    "id": "id",
+                                    "key": "id",
+                                    "value": "1",
+                                    "description": "The ID of the equb package."
+                                }
+                            ]
+                        },
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\"name\":\"b\",\"type\":\"normal\",\"fixed_contribution_amount\":39,\"min_contribution_amount\":84,\"max_contribution_amount\":12,\"contribution_frequency_days\":27,\"duration_type\":\"fixed\",\"duration_days\":35,\"max_members\":43,\"terms_content\":\"architecto\",\"is_active\":false}"
+                        },
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "DELETE api\/admin\/equb-packages\/{id}",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/admin\/equb-packages\/:id",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/admin\/equb-packages\/:id",
+                            "variable": [
+                                {
+                                    "id": "id",
+                                    "key": "id",
+                                    "value": "1",
+                                    "description": "The ID of the equb package."
+                                }
+                            ]
+                        },
+                        "method": "DELETE",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "GET api\/admin\/equb-groups",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/admin\/equb-groups",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/admin\/equb-groups"
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "POST api\/admin\/equb-groups",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/admin\/equb-groups",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/admin\/equb-groups"
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\"equb_package_id\":\"architecto\",\"registration_open_at\":\"2026-08-18T20:18:49\",\"registration_close_at\":\"2052-09-10\",\"equb_start_date\":\"2026-08-18T20:18:49\",\"equb_end_date\":\"2026-08-18T20:18:49\",\"max_members\":22,\"status\":\"cancelled\",\"is_locked\":true,\"draw_type\":\"manual\"}"
+                        },
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "GET api\/admin\/equb-groups\/{id}",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/admin\/equb-groups\/:id",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/admin\/equb-groups\/:id",
+                            "variable": [
+                                {
+                                    "id": "id",
+                                    "key": "id",
+                                    "value": "1",
+                                    "description": "The ID of the equb group."
+                                }
+                            ]
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "PUT api\/admin\/equb-groups\/{id}",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/admin\/equb-groups\/:id",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/admin\/equb-groups\/:id",
+                            "variable": [
+                                {
+                                    "id": "id",
+                                    "key": "id",
+                                    "value": "1",
+                                    "description": "The ID of the equb group."
+                                }
+                            ]
+                        },
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\"registration_open_at\":\"2026-08-18T20:18:49\",\"registration_close_at\":\"2026-08-18T20:18:49\",\"equb_start_date\":\"2026-08-18T20:18:49\",\"equb_end_date\":\"2026-08-18T20:18:49\",\"max_members\":16,\"status\":\"registration\",\"is_locked\":false,\"draw_type\":\"manual\"}"
+                        },
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "DELETE api\/admin\/equb-groups\/{id}",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/admin\/equb-groups\/:id",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/admin\/equb-groups\/:id",
+                            "variable": [
+                                {
+                                    "id": "id",
+                                    "key": "id",
+                                    "value": "1",
+                                    "description": "The ID of the equb group."
+                                }
+                            ]
+                        },
+                        "method": "DELETE",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "POST api\/admin\/equb-groups\/{equbGroup_id}\/open-registration",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/admin\/equb-groups\/:equbGroup_id\/open-registration",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/admin\/equb-groups\/:equbGroup_id\/open-registration",
+                            "variable": [
+                                {
+                                    "id": "equbGroup_id",
+                                    "key": "equbGroup_id",
+                                    "value": "1",
+                                    "description": "The ID of the equbGroup."
+                                }
+                            ]
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "POST api\/admin\/equb-groups\/{equbGroup_id}\/close-registration",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/admin\/equb-groups\/:equbGroup_id\/close-registration",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/admin\/equb-groups\/:equbGroup_id\/close-registration",
+                            "variable": [
+                                {
+                                    "id": "equbGroup_id",
+                                    "key": "equbGroup_id",
+                                    "value": "1",
+                                    "description": "The ID of the equbGroup."
+                                }
+                            ]
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "POST api\/admin\/equb-groups\/{equbGroup_id}\/start-equb",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/admin\/equb-groups\/:equbGroup_id\/start-equb",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/admin\/equb-groups\/:equbGroup_id\/start-equb",
+                            "variable": [
+                                {
+                                    "id": "equbGroup_id",
+                                    "key": "equbGroup_id",
+                                    "value": "1",
+                                    "description": "The ID of the equbGroup."
+                                }
+                            ]
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "POST api\/admin\/equb-groups\/{equbGroup_id}\/run-draw",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/admin\/equb-groups\/:equbGroup_id\/run-draw",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/admin\/equb-groups\/:equbGroup_id\/run-draw",
+                            "variable": [
+                                {
+                                    "id": "equbGroup_id",
+                                    "key": "equbGroup_id",
+                                    "value": "1",
+                                    "description": "The ID of the equbGroup."
+                                }
+                            ]
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "GET api\/admin\/equb-memberships",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/admin\/equb-memberships",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/admin\/equb-memberships"
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "POST api\/admin\/equb-memberships",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/admin\/equb-memberships",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/admin\/equb-memberships"
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\"member_id\":\"architecto\",\"equb_group_id\":\"architecto\",\"contribution_amount\":39,\"contribution_frequency_days\":67}"
+                        },
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "GET api\/admin\/equb-memberships\/{id}",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/admin\/equb-memberships\/:id",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/admin\/equb-memberships\/:id",
+                            "variable": [
+                                {
+                                    "id": "id",
+                                    "key": "id",
+                                    "value": "1",
+                                    "description": "The ID of the equb membership."
+                                }
+                            ]
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "PUT api\/admin\/equb-memberships\/{id}",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/admin\/equb-memberships\/:id",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/admin\/equb-memberships\/:id",
+                            "variable": [
+                                {
+                                    "id": "id",
+                                    "key": "id",
+                                    "value": "1",
+                                    "description": "The ID of the equb membership."
+                                }
+                            ]
+                        },
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\"contribution_amount\":27,\"contribution_frequency_days\":22,\"status\":\"completed\"}"
+                        },
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "DELETE api\/admin\/equb-memberships\/{id}",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/admin\/equb-memberships\/:id",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/admin\/equb-memberships\/:id",
+                            "variable": [
+                                {
+                                    "id": "id",
+                                    "key": "id",
+                                    "value": "1",
+                                    "description": "The ID of the equb membership."
+                                }
+                            ]
+                        },
+                        "method": "DELETE",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "GET api\/admin\/equb-draws",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/admin\/equb-draws",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/admin\/equb-draws"
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "GET api\/admin\/equb-draws\/{equbDraw_id}",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/admin\/equb-draws\/:equbDraw_id",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/admin\/equb-draws\/:equbDraw_id",
+                            "variable": [
+                                {
+                                    "id": "equbDraw_id",
+                                    "key": "equbDraw_id",
+                                    "value": "1",
+                                    "description": "The ID of the equbDraw."
+                                }
+                            ]
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "GET api\/admin\/member-equb-groups",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/admin\/member-equb-groups",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/admin\/member-equb-groups"
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "GET api\/admin\/member-equb-groups\/{equbGroup_id}",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/admin\/member-equb-groups\/:equbGroup_id",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/admin\/member-equb-groups\/:equbGroup_id",
+                            "variable": [
+                                {
+                                    "id": "equbGroup_id",
+                                    "key": "equbGroup_id",
+                                    "value": "1",
+                                    "description": "The ID of the equbGroup."
+                                }
+                            ]
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "GET api\/admin\/member-equb-groups\/{equbGroup_id}\/ledger",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/admin\/member-equb-groups\/:equbGroup_id\/ledger",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/admin\/member-equb-groups\/:equbGroup_id\/ledger",
+                            "variable": [
+                                {
+                                    "id": "equbGroup_id",
+                                    "key": "equbGroup_id",
+                                    "value": "1",
+                                    "description": "The ID of the equbGroup."
+                                }
+                            ]
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "POST api\/admin\/member-equb-groups\/{equbGroup_id}\/approve",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/admin\/member-equb-groups\/:equbGroup_id\/approve",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/admin\/member-equb-groups\/:equbGroup_id\/approve",
+                            "variable": [
+                                {
+                                    "id": "equbGroup_id",
+                                    "key": "equbGroup_id",
+                                    "value": "1",
+                                    "description": "The ID of the equbGroup."
+                                }
+                            ]
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "POST api\/admin\/member-equb-groups\/{equbGroup_id}\/reject",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/admin\/member-equb-groups\/:equbGroup_id\/reject",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/admin\/member-equb-groups\/:equbGroup_id\/reject",
+                            "variable": [
+                                {
+                                    "id": "equbGroup_id",
+                                    "key": "equbGroup_id",
+                                    "value": "1",
+                                    "description": "The ID of the equbGroup."
+                                }
+                            ]
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\"reason\":\"b\"}"
+                        },
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Admin runs a round on the group's behalf (support case).",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/admin\/member-equb-groups\/:equbGroup_id\/run-draw",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/admin\/member-equb-groups\/:equbGroup_id\/run-draw",
+                            "variable": [
+                                {
+                                    "id": "equbGroup_id",
+                                    "key": "equbGroup_id",
+                                    "value": "1",
+                                    "description": "The ID of the equbGroup."
+                                }
+                            ]
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\"membership_ids\":[16],\"winners_count\":22}"
+                        },
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "GET api\/agent\/dashboard",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/agent\/dashboard",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/agent\/dashboard"
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "GET api\/agent\/members",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/agent\/members",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/agent\/members"
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "POST api\/agent\/members",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/agent\/members",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/agent\/members"
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\"full_name\":\"b\",\"phone\":\"9425593\",\"email\":\"lafayette.considine@example.com\",\"password\":\"i\\\/#iw\\\/kXaz<m\",\"gender\":\"female\",\"date_of_birth\":\"2026-08-18T20:18:50\",\"address\":\"w\"}"
+                        },
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "GET api\/agent\/payouts",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/agent\/payouts",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/agent\/payouts"
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "GET api\/agent\/payments",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/agent\/payments",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/agent\/payments"
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "POST api\/agent\/payments",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/agent\/payments",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/agent\/payments"
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\"amount\":16,\"bank_name\":\"n\",\"account_number\":\"g\",\"account_holder_name\":\"z\",\"status\":\"failed\",\"paid_at\":\"2026-08-18T20:18:50\"}"
+                        },
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "GET api\/agent\/commissions",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/agent\/commissions",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/agent\/commissions"
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "GET api\/member\/agents\/{referralCode}",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/member\/agents\/:referralCode",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/member\/agents\/:referralCode",
+                            "variable": [
+                                {
+                                    "id": "referralCode",
+                                    "key": "referralCode",
+                                    "value": "16",
+                                    "description": ""
+                                }
+                            ]
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "POST api\/member\/payments",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/member\/payments",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/member\/payments"
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\"amount\":16,\"status\":\"failed\",\"paid_at\":\"2026-08-18T20:18:50\"}"
+                        },
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "List active Equb packages (for mobile browse\/join).",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/member\/equb-packages",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/member\/equb-packages"
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Show a single package.",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/member\/equb-packages\/:equbPackage_id",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/member\/equb-packages\/:equbPackage_id",
+                            "variable": [
+                                {
+                                    "id": "equbPackage_id",
+                                    "key": "equbPackage_id",
+                                    "value": "1",
+                                    "description": "The ID of the equbPackage."
+                                }
+                            ]
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "List Equb groups (optionally filter by status: registration, running).",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/member\/equb-groups",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/member\/equb-groups"
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Show a single group with package.",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/member\/equb-groups\/:equbGroup_id",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/member\/equb-groups\/:equbGroup_id",
+                            "variable": [
+                                {
+                                    "id": "equbGroup_id",
+                                    "key": "equbGroup_id",
+                                    "value": "1",
+                                    "description": "The ID of the equbGroup."
+                                }
+                            ]
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "List draws (for my groups or by equb_group_id).",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/member\/equb-draws",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/member\/equb-draws"
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Show a single draw.",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/member\/equb-draws\/:equbDraw_id",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/member\/equb-draws\/:equbDraw_id",
+                            "variable": [
+                                {
+                                    "id": "equbDraw_id",
+                                    "key": "equbDraw_id",
+                                    "value": "1",
+                                    "description": "The ID of the equbDraw."
+                                }
+                            ]
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "POST \/member\/member-lookup \u2014 exact phone or referral code.",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/member\/member-lookup",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/member\/member-lookup"
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\"phone\":\"bngzmiyvdljnikhw\",\"referral_code\":\"aykcmyuwpwlvqwrs\"}"
+                        },
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "GET|POST \/member\/member-search?q=.",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/member\/member-search",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/member\/member-search"
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "..\n\nMatches on member name, user name or phone. Phone matching uses the last\n8 digits so 09xxxxxxxx finds someone stored as +2519xxxxxxxx.",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "GET|POST \/member\/member-search?q=.",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/member\/member-search",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/member\/member-search"
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "..\n\nMatches on member name, user name or phone. Phone matching uses the last\n8 digits so 09xxxxxxxx finds someone stored as +2519xxxxxxxx.",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Invitations waiting for me.",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/member\/equb-invitations",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/member\/equb-invitations"
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "POST api\/member\/equb-invitations\/{invitation_id}\/accept",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/member\/equb-invitations\/:invitation_id\/accept",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/member\/equb-invitations\/:invitation_id\/accept",
+                            "variable": [
+                                {
+                                    "id": "invitation_id",
+                                    "key": "invitation_id",
+                                    "value": "1",
+                                    "description": "The ID of the invitation."
+                                }
+                            ]
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "POST api\/member\/equb-invitations\/{invitation_id}\/decline",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/member\/equb-invitations\/:invitation_id\/decline",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/member\/equb-invitations\/:invitation_id\/decline",
+                            "variable": [
+                                {
+                                    "id": "invitation_id",
+                                    "key": "invitation_id",
+                                    "value": "1",
+                                    "description": "The ID of the invitation."
+                                }
+                            ]
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "The inviter withdraws an invitation.",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/member\/equb-invitations\/:invitation_id",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/member\/equb-invitations\/:invitation_id",
+                            "variable": [
+                                {
+                                    "id": "invitation_id",
+                                    "key": "invitation_id",
+                                    "value": "1",
+                                    "description": "The ID of the invitation."
+                                }
+                            ]
+                        },
+                        "method": "DELETE",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": []
+                }
+            ]
+        }
+    ],
+    "auth": {
+        "type": "bearer",
+        "bearer": [
+            {
+                "key": "Authorization",
+                "type": "string"
+            }
+        ]
+    }
+}

@@ -75,11 +75,44 @@ SCRIBE_BASE_URL="https://cms.niya-et.com"
 
 ## 3. Generating the documentation
 
+> ### Generate locally. Never on the server.
+>
+> Scribe is a `require-dev` package. Production runs `composer install --no-dev`, so Scribe is
+> not installed there and `php artisan scribe:generate` fails with:
+>
+> ```
+> There are no commands defined in the "scribe" namespace.
+> ```
+>
+> That is expected, not a misconfiguration. The generated output is committed to the
+> repository and deployed like any other file — the server never runs the generator.
+
+On your **development machine**:
+
 ```bash
-php artisan scribe:generate
+php artisan scribe:generate      # or: composer docs
+git add public/docs .scribe
+git commit -m "Regenerate API documentation"
+git push origin main
 ```
 
-Output lands in `public/docs/`. **Commit that directory.**
+On the **server**:
+
+```bash
+git pull origin main --no-rebase
+php artisan optimize:clear && php artisan config:cache && php artisan route:cache
+```
+
+Then confirm:
+
+```bash
+curl -sI https://cms.niya-et.com/docs/ | head -1        # expect 200
+curl -s  https://cms.niya-et.com/docs/openapi.yaml | head -5
+```
+
+Output lands in `public/docs/`, and Scribe's editable intermediate Markdown in `.scribe/`.
+**Commit both.** `.scribe/` holds any hand-written additions and is the source for the next
+regeneration; losing it means losing those edits.
 
 ### Why output is static, not a live route
 

@@ -1,0 +1,181 @@
+name: 'Member · Memberships'
+description: ''
+endpoints:
+  -
+    custom: []
+    httpMethods:
+      - GET
+    uri: api/member/equb-memberships
+    metadata:
+      custom: []
+      groupName: 'Member · Memberships'
+      groupDescription: ''
+      subgroup: ''
+      subgroupDescription: ''
+      title: "List current user's Equb memberships."
+      description: ''
+      authenticated: true
+      deprecated: false
+    headers:
+      Authorization: 'Bearer {YOUR_BEARER_TOKEN}'
+      Content-Type: application/json
+      Accept: application/json
+    urlParameters: []
+    cleanUrlParameters: []
+    queryParameters: []
+    cleanQueryParameters: []
+    bodyParameters: []
+    cleanBodyParameters: []
+    fileParameters: []
+    responses: []
+    responseFields: []
+    auth:
+      - headers
+      - Authorization
+      - 'Bearer 6g43cv8PD1aE5beadkZfhV6'
+    controller: null
+    method: null
+    route: null
+  -
+    custom: []
+    httpMethods:
+      - POST
+    uri: api/member/equb-memberships
+    metadata:
+      custom: []
+      groupName: 'Member · Memberships'
+      groupDescription: ''
+      subgroup: ''
+      subgroupDescription: ''
+      title: 'Join an Equb group (create membership).'
+      description: |-
+        After joining, subscribe the device's FCM token to the group draw topic
+        so the member automatically receives draw push notifications.
+      authenticated: true
+      deprecated: false
+    headers:
+      Authorization: 'Bearer {YOUR_BEARER_TOKEN}'
+      Content-Type: application/json
+      Accept: application/json
+    urlParameters: []
+    cleanUrlParameters: []
+    queryParameters: []
+    cleanQueryParameters: []
+    bodyParameters:
+      equb_group_id:
+        custom: []
+        name: equb_group_id
+        description: 'The <code>id</code> of an existing record in the equb_groups table.'
+        required: true
+        example: architecto
+        type: string
+        enumValues: []
+        exampleWasSpecified: false
+        nullable: false
+        deprecated: false
+    cleanBodyParameters:
+      equb_group_id: architecto
+    fileParameters: []
+    responses: []
+    responseFields: []
+    auth:
+      - headers
+      - Authorization
+      - 'Bearer 6g43cv8PD1aE5beadkZfhV6'
+    controller: null
+    method: null
+    route: null
+  -
+    custom: []
+    httpMethods:
+      - GET
+    uri: 'api/member/equb-memberships/{equbMembership_id}'
+    metadata:
+      custom: []
+      groupName: 'Member · Memberships'
+      groupDescription: ''
+      subgroup: ''
+      subgroupDescription: ''
+      title: 'Show one of my memberships.'
+      description: ''
+      authenticated: true
+      deprecated: false
+    headers:
+      Authorization: 'Bearer {YOUR_BEARER_TOKEN}'
+      Content-Type: application/json
+      Accept: application/json
+    urlParameters:
+      equbMembership_id:
+        custom: []
+        name: equbMembership_id
+        description: 'The ID of the equbMembership.'
+        required: true
+        example: 1
+        type: integer
+        enumValues: []
+        exampleWasSpecified: false
+        nullable: false
+        deprecated: false
+    cleanUrlParameters:
+      equbMembership_id: 1
+    queryParameters: []
+    cleanQueryParameters: []
+    bodyParameters: []
+    cleanBodyParameters: []
+    fileParameters: []
+    responses: []
+    responseFields: []
+    auth:
+      - headers
+      - Authorization
+      - 'Bearer 6g43cv8PD1aE5beadkZfhV6'
+    controller: null
+    method: null
+    route: null
+  -
+    custom: []
+    httpMethods:
+      - POST
+    uri: 'api/member/equb-memberships/{equbMembership_id}/leave'
+    metadata:
+      custom: []
+      groupName: 'Member · Memberships'
+      groupDescription: ''
+      subgroup: ''
+      subgroupDescription: ''
+      title: 'Leave an Equb group if no payments have been made.'
+      description: ''
+      authenticated: true
+      deprecated: false
+    headers:
+      Authorization: 'Bearer {YOUR_BEARER_TOKEN}'
+      Content-Type: application/json
+      Accept: application/json
+    urlParameters:
+      equbMembership_id:
+        custom: []
+        name: equbMembership_id
+        description: 'The ID of the equbMembership.'
+        required: true
+        example: 1
+        type: integer
+        enumValues: []
+        exampleWasSpecified: false
+        nullable: false
+        deprecated: false
+    cleanUrlParameters:
+      equbMembership_id: 1
+    queryParameters: []
+    cleanQueryParameters: []
+    bodyParameters: []
+    cleanBodyParameters: []
+    fileParameters: []
+    responses: []
+    responseFields: []
+    auth:
+      - headers
+      - Authorization
+      - 'Bearer 6g43cv8PD1aE5beadkZfhV6'
+    controller: null
+    method: null
+    route: null

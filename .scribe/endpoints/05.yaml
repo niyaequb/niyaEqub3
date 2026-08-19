@@ -1,0 +1,252 @@
+name: 'Member · Contributions'
+description: ''
+endpoints:
+  -
+    custom: []
+    httpMethods:
+      - GET
+    uri: api/member/equb-payments
+    metadata:
+      custom: []
+      groupName: 'Member · Contributions'
+      groupDescription: ''
+      subgroup: ''
+      subgroupDescription: ''
+      title: "List payments for current user's memberships."
+      description: ''
+      authenticated: true
+      deprecated: false
+    headers:
+      Authorization: 'Bearer {YOUR_BEARER_TOKEN}'
+      Content-Type: application/json
+      Accept: application/json
+    urlParameters: []
+    cleanUrlParameters: []
+    queryParameters: []
+    cleanQueryParameters: []
+    bodyParameters: []
+    cleanBodyParameters: []
+    fileParameters: []
+    responses: []
+    responseFields: []
+    auth:
+      - headers
+      - Authorization
+      - 'Bearer 6g43cv8PD1aE5beadkZfhV6'
+    controller: null
+    method: null
+    route: null
+  -
+    custom: []
+    httpMethods:
+      - POST
+    uri: api/member/equb-payments
+    metadata:
+      custom: []
+      groupName: 'Member · Contributions'
+      groupDescription: ''
+      subgroup: ''
+      subgroupDescription: ''
+      title: 'Create a payment (offline) or initiate Chapa (online).'
+      description: ''
+      authenticated: true
+      deprecated: false
+    headers:
+      Authorization: 'Bearer {YOUR_BEARER_TOKEN}'
+      Content-Type: application/json
+      Accept: application/json
+    urlParameters: []
+    cleanUrlParameters: []
+    queryParameters: []
+    cleanQueryParameters: []
+    bodyParameters:
+      equb_membership_id:
+        custom: []
+        name: equb_membership_id
+        description: 'The <code>id</code> of an existing record in the equb_memberships table.'
+        required: true
+        example: architecto
+        type: string
+        enumValues: []
+        exampleWasSpecified: false
+        nullable: false
+        deprecated: false
+      amount:
+        custom: []
+        name: amount
+        description: 'Must be at least 0.'
+        required: true
+        example: 39
+        type: number
+        enumValues: []
+        exampleWasSpecified: false
+        nullable: false
+        deprecated: false
+      payment_date:
+        custom: []
+        name: payment_date
+        description: 'Must be a valid date.'
+        required: true
+        example: '2026-08-18T20:18:51'
+        type: string
+        enumValues: []
+        exampleWasSpecified: false
+        nullable: false
+        deprecated: false
+      payment_method:
+        custom: []
+        name: payment_method
+        description: ''
+        required: true
+        example: offline
+        type: string
+        enumValues:
+          - chapa
+          - offline
+          - manual
+        exampleWasSpecified: false
+        nullable: false
+        deprecated: false
+    cleanBodyParameters:
+      equb_membership_id: architecto
+      amount: 39
+      payment_date: '2026-08-18T20:18:51'
+      payment_method: offline
+    fileParameters: []
+    responses: []
+    responseFields: []
+    auth:
+      - headers
+      - Authorization
+      - 'Bearer 6g43cv8PD1aE5beadkZfhV6'
+    controller: null
+    method: null
+    route: null
+  -
+    custom: []
+    httpMethods:
+      - POST
+    uri: api/member/equb-payments/batch
+    metadata:
+      custom: []
+      groupName: 'Member · Contributions'
+      groupDescription: ''
+      subgroup: ''
+      subgroupDescription: ''
+      title: 'Settle several contributions in one go.'
+      description: |-
+        A member who holds places for "My Responsibility People" owes one
+        contribution per place, every round. Each place keeps its own payment
+        row — the ledger, the schedule and draw eligibility all count per place
+        — but the member should go through checkout once, for the total.
+
+        The rows are created up front and tied together by batch_reference; the
+        gateway sees a single charge against that reference, and the webhook
+        marks every row carrying it as paid together.
+      authenticated: true
+      deprecated: false
+    headers:
+      Authorization: 'Bearer {YOUR_BEARER_TOKEN}'
+      Content-Type: application/json
+      Accept: application/json
+    urlParameters: []
+    cleanUrlParameters: []
+    queryParameters: []
+    cleanQueryParameters: []
+    bodyParameters:
+      equb_membership_ids:
+        custom: []
+        name: equb_membership_ids
+        description: ''
+        required: false
+        example:
+          - 16
+        type: 'integer[]'
+        enumValues: []
+        exampleWasSpecified: false
+        nullable: false
+        deprecated: false
+      payment_date:
+        custom: []
+        name: payment_date
+        description: 'Must be a valid date.'
+        required: true
+        example: '2026-08-18T20:18:51'
+        type: string
+        enumValues: []
+        exampleWasSpecified: false
+        nullable: false
+        deprecated: false
+      payment_method:
+        custom: []
+        name: payment_method
+        description: ''
+        required: false
+        example: architecto
+        type: string
+        enumValues: []
+        exampleWasSpecified: false
+        nullable: true
+        deprecated: false
+    cleanBodyParameters:
+      equb_membership_ids:
+        - 16
+      payment_date: '2026-08-18T20:18:51'
+      payment_method: architecto
+    fileParameters: []
+    responses: []
+    responseFields: []
+    auth:
+      - headers
+      - Authorization
+      - 'Bearer 6g43cv8PD1aE5beadkZfhV6'
+    controller: null
+    method: null
+    route: null
+  -
+    custom: []
+    httpMethods:
+      - GET
+    uri: 'api/member/equb-payments/{equbPayment_id}'
+    metadata:
+      custom: []
+      groupName: 'Member · Contributions'
+      groupDescription: ''
+      subgroup: ''
+      subgroupDescription: ''
+      title: "Show a single payment (only if it belongs to current user's membership)."
+      description: ''
+      authenticated: true
+      deprecated: false
+    headers:
+      Authorization: 'Bearer {YOUR_BEARER_TOKEN}'
+      Content-Type: application/json
+      Accept: application/json
+    urlParameters:
+      equbPayment_id:
+        custom: []
+        name: equbPayment_id
+        description: 'The ID of the equbPayment.'
+        required: true
+        example: 1
+        type: integer
+        enumValues: []
+        exampleWasSpecified: false
+        nullable: false
+        deprecated: false
+    cleanUrlParameters:
+      equbPayment_id: 1
+    queryParameters: []
+    cleanQueryParameters: []
+    bodyParameters: []
+    cleanBodyParameters: []
+    fileParameters: []
+    responses: []
+    responseFields: []
+    auth:
+      - headers
+      - Authorization
+      - 'Bearer 6g43cv8PD1aE5beadkZfhV6'
+    controller: null
+    method: null
+    route: null

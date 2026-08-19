@@ -18,6 +18,130 @@ class ChapaService
         $this->envService = $envService;
     }
 
+    /**
+     * Make a string safe for Chapa's `customization` fields.
+     *
+     * Chapa rejects the entire transaction if customization.title or
+     * customization.description contains anything outside letters, numbers,
+     * hyphens, underscores, spaces and dots. "Letters" means ASCII letters, so
+     * Amharic and Oromo text does not survive either.
+     *
+     * Every string that reaches these fields carries something a person typed
+     * — a campaign name, a contribution type, the name a sponsor gave someone
+     * under "My Responsibility People". Sanitising here, at the one point where
+     * the value crosses into Chapa, is the only place it can be done reliably;
+     * upstream callers are all free to hand over a real name and none of them
+     * should have to know this rule.
+     *
+     * Disallowed characters become a space instead of being dropped, so
+     * "Mohammed (Junior)" reads as "Mohammed Junior" and not "MohammedJunior".
+     * When nothing usable survives — a name written entirely in Amharic — the
+     * caller's fallback is used, because a cosmetic label must never be the
+     * reason a payment is refused.
+     */
+    protected function chapaText(?string $value, string $fallback, int $limit = 50): string
+    {
+        $clean = preg_replace('/[^A-Za-z0-9\-_. ]+/', ' ', (string) $value);
+        $clean = trim((string) preg_replace('/\s+/', ' ', (string) $clean), " .");
+
+        if ($clean === '') {
+            return $fallback;
+        }
+
+        return rtrim(mb_substr($clean, 0, $limit), ' .');
+    }
+
+    /**
+     * Turn a Chapa failure into something worth showing a member.
+     *
+     * Chapa sends `message` as a plain string for ordinary failures, but as a
+     * field => errors map when its own request validation rejects the payload.
+     * Returning that map straight to the client is how a member ended up
+     * reading "{customization.description: [The customization.description may
+     * only contain letters, numbers...]}" across the bottom of the app — a
+     * message about our request shape, addressed to nobody who could act on it.
+     *
+     * The full payload is already written to the log by every caller, which is
+     * where that detail belongs.
+     */
+    protected function chapaFailureMessage(
+        mixed $message,
+        string $fallback = 'Payment could not be started. Please try again.',
+    ): string {
+        if (is_string($message) && trim($message) !== '') {
+            return $message;
+        }
+
+        return $fallback;
+    }
+
+    /**
+     * "Equb contribution for Amina", or just "Equb contribution payment" when
+     * the name cannot be carried.
+     *
+     * The name is cleaned by itself so the sentence is only built once there
+     * is something left to put in it. Cleaning the whole sentence at once
+     * leaves "Equb contribution for" trailing off when the name was written in
+     * a script Chapa will not accept.
+     */
+    protected function chapaDescriptionFor(?string $name): string
+    {
+        $clean = $this->chapaText($name, '', 30);
+
+        return $clean === ''
+            ? 'Equb contribution payment'
+            : 'Equb contribution for '.$clean;
+    }
+
+    /**
+     * The single door out to Chapa.
+     *
+     * Every transaction in this class posts through here so the customization
+     * fields are scrubbed one last time on the way out, whatever the caller
+     * assembled. Chapa rejects the whole request — no charge, no checkout page,
+     * an error the member sees — if title or description carries anything
+     * outside letters, numbers, hyphens, underscores, spaces and dots.
+     *
+     * Callers already sanitise, so in practice this changes nothing. It exists
+     * because that promise is easy to break: these strings are built from
+     * campaign names, contribution types and names typed by members, and it
+     * only takes one new call site interpolating a raw name to put a bracket
+     * or an apostrophe back into the payload. A guarantee held in one place
+     * that every request must pass through is worth more than the same rule
+     * repeated at four call sites and remembered at a fifth.
+     */
+    protected function postToChapa(array $payload, string $secretKey)
+    {
+        if (isset($payload['customization']) && is_array($payload['customization'])) {
+            $custom = $payload['customization'];
+
+            $safeTitle = $this->chapaText($custom['title'] ?? null, 'Payment', 16);
+            $safeDescription = $this->chapaText($custom['description'] ?? null, 'Payment');
+
+            // If anything had to be changed here, a caller slipped through.
+            // Log it rather than silently papering over it, so the real fix
+            // can be made upstream instead of relying on this net forever.
+            if (($custom['title'] ?? null) !== $safeTitle
+                || ($custom['description'] ?? null) !== $safeDescription) {
+                Log::warning('Chapa customization was rewritten before sending', [
+                    'tx_ref' => $payload['tx_ref'] ?? null,
+                    'title_before' => $custom['title'] ?? null,
+                    'title_after' => $safeTitle,
+                    'description_before' => $custom['description'] ?? null,
+                    'description_after' => $safeDescription,
+                ]);
+            }
+
+            $payload['customization']['title'] = $safeTitle;
+            $payload['customization']['description'] = $safeDescription;
+        }
+
+        return Http::withHeaders([
+            'Authorization' => 'Bearer '.$secretKey,
+            'Content-Type' => 'application/json',
+        ])->post('https://api.chapa.co/v1/transaction/initialize', $payload);
+    }
+
     //  private function verifyWebhookSignature($request): bool
     // {
     //     $secret = env('CHAPA_WEBHOOK_SECRET');
@@ -87,7 +211,9 @@ class ChapaService
             'return_url' => $returnUrl,
             'customization' => [
                 'title' => 'GDCA Cont. Pyt',
-                'description' => $contribution->type->name ?? 'Contribution Payment',
+                // Contribution type names are admin-entered and have the same
+                // exposure as any other free-text label reaching Chapa.
+                'description' => $this->chapaText($contribution->type->name ?? null, 'Contribution Payment'),
             ],
             'meta' => [
                 'member_id' => $member->id,
@@ -98,10 +224,7 @@ class ChapaService
         ];
 
         try {
-            $response = Http::withHeaders([
-                'Authorization' => 'Bearer '.$secretKey,
-                'Content-Type' => 'application/json',
-            ])->post('https://api.chapa.co/v1/transaction/initialize', $payload);
+            $response = $this->postToChapa($payload, $secretKey);
 
             $data = $response->json();
 
@@ -346,7 +469,7 @@ class ChapaService
             'return_url' => $returnUrl,
             'customization' => [
                 'title' => 'GDCA Donation',
-                'description' => Str::limit(preg_replace('/[^A-Za-z0-9\-\_\.\s]/', '', $campaign?->name ?? 'General Donation'), 50, ''),
+                'description' => $this->chapaText($campaign?->name, 'General Donation'),
             ],
             'meta' => [
                 'donation_id' => $donation->id,
@@ -357,10 +480,7 @@ class ChapaService
         ];
 
         try {
-            $response = Http::withHeaders([
-                'Authorization' => 'Bearer '.$secretKey,
-                'Content-Type' => 'application/json',
-            ])->post('https://api.chapa.co/v1/transaction/initialize', $payload);
+            $response = $this->postToChapa($payload, $secretKey);
 
             $data = $response->json();
 
@@ -552,8 +672,14 @@ class ChapaService
             'return_url' => $returnUrl,
             'customization' => [
                 'title' => 'Equb Payment',
+                // The name here is whatever the sponsor typed for a person
+                // they are responsible for, so it is sanitised on its own
+                // rather than as part of the sentence: a name written in
+                // Amharic survives Chapa's ASCII-only rule as nothing at all,
+                // and "Equb contribution for" with the name missing off the
+                // end reads worse than not naming them.
                 'description' => $isSeat
-                    ? 'Equb contribution for '.$membership->displayName()
+                    ? $this->chapaDescriptionFor($membership->displayName())
                     : 'Equb contribution payment',
             ],
             'meta' => [
@@ -566,10 +692,7 @@ class ChapaService
         ];
 
         try {
-            $response = Http::withHeaders([
-                'Authorization' => 'Bearer '.$secretKey,
-                'Content-Type' => 'application/json',
-            ])->post('https://api.chapa.co/v1/transaction/initialize', $payload);
+            $response = $this->postToChapa($payload, $secretKey);
 
             $data = $response->json();
 
@@ -585,7 +708,7 @@ class ChapaService
 
             return [
                 'success' => false,
-                'message' => $data['message'] ?? 'Failed to initialize payment',
+                'message' => $this->chapaFailureMessage($data['message'] ?? null),
             ];
         } catch (\Exception $e) {
             Log::error('Chapa Equb payment initialization failed', [
@@ -640,8 +763,14 @@ class ChapaService
             'return_url' => $returnUrl,
             'customization' => [
                 'title' => 'Equb Payment',
+                // No brackets: Chapa allows only letters, numbers, hyphens,
+                // underscores, spaces and dots, and "(2 places)" was enough to
+                // have it reject the payment outright.
                 'description' => $count > 1
-                    ? "Equb contributions ({$count} places)"
+                    ? $this->chapaText(
+                        "Equb contribution for {$count} places",
+                        'Equb contribution payment',
+                    )
                     : 'Equb contribution payment',
             ],
             'meta' => [
@@ -654,10 +783,7 @@ class ChapaService
         ];
 
         try {
-            $response = Http::withHeaders([
-                'Authorization' => 'Bearer '.$secretKey,
-                'Content-Type' => 'application/json',
-            ])->post('https://api.chapa.co/v1/transaction/initialize', $payload);
+            $response = $this->postToChapa($payload, $secretKey);
 
             $data = $response->json();
 
@@ -673,7 +799,7 @@ class ChapaService
 
             return [
                 'success' => false,
-                'message' => $data['message'] ?? 'Failed to initialize payment',
+                'message' => $this->chapaFailureMessage($data['message'] ?? null),
             ];
         } catch (\Exception $e) {
             Log::error('Chapa Equb batch payment initialization failed', [
