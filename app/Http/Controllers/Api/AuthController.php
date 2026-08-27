@@ -19,8 +19,16 @@ use Illuminate\Http\Request;
  * Phone-verified onboarding, session issue and session teardown.
  *
  * The onboarding sequence is mandatory and ordered: send-otp, verify-otp, register, login.
- * Registration deliberately returns `token: null` — a separate sign-in call is required to
- * obtain a usable credential.
+ *
+ * Registration returns a usable `token`, so a client that gets one can go straight into the
+ * authenticated app instead of immediately calling login with credentials it just supplied.
+ * It can still come back null: the account is created inside a transaction that commits
+ * before the token is signed, so if signing fails the account exists and the token does not.
+ * Treat a null token as "send the user to the sign-in screen", never as a failed signup.
+ *
+ * This previously documented `token: null` as unconditional, which it no longer is. The
+ * token was in fact being minted and discarded, and every client worked around it with a
+ * second round trip.
  *
  * @group Authentication
  */

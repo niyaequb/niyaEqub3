@@ -4,11 +4,11 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Services\AuthService;
 use App\Services\Payments\PaymentGatewayManager;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
-use Tymon\JWTAuth\Facades\JWTAuth;
 
 /**
  * Signing in through a bank's host app.
@@ -41,6 +41,7 @@ class MiniAppController extends Controller
         Request $request,
         string $provider,
         PaymentGatewayManager $gateways,
+        AuthService $auth,
     ): JsonResponse {
         $gateway = $gateways->tryGet($provider);
 
@@ -111,7 +112,14 @@ class MiniAppController extends Controller
             'status' => 'success',
             'registered' => true,
             'provider' => $gateway->slug(),
-            'token' => JWTAuth::fromUser($user),
+            // Minted through AuthService rather than JWTAuth directly. The
+            // bare facade call that used to be here shared the fault that
+            // broke ordinary login: a signing failure — an empty JWT_SECRET,
+            // most often — threw uncaught and reached the member as a flat
+            // HTTP 500 saying nothing. issueToken() turns that into a 503 with
+            // a message, which is what the mini app needs to fall back to
+            // phone-and-OTP instead of appearing broken.
+            'token' => $auth->issueToken($user),
             // The bank's own session token, where it issued one. The app keeps
             // it and presents it back as `xAccessToken` when authorising an
             // order; the server does not store it.

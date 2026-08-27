@@ -8,7 +8,10 @@ use App\Models\User;
 use Exception;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Symfony\Component\HttpKernel\Exception\ServiceUnavailableHttpException;
+use Throwable;
 use Tymon\JWTAuth\Exceptions\JWTException;
 use Tymon\JWTAuth\Exceptions\TokenExpiredException;
 use Tymon\JWTAuth\Facades\JWTAuth;
@@ -67,13 +70,33 @@ class AuthService
                 return $this->registerMember($data);
             });
 
-            $token = JWTAuth::fromUser($user);
+            // Issued and RETURNED. It used to be issued and thrown away, with
+            // `'token' => null` hard-coded below it, which left the apps to
+            // make a second round trip to /auth/login immediately after every
+            // signup just to get the token that had already been minted here.
+            // That also made registration silently depend on login working:
+            // when login broke, signup appeared to break too, in a way that
+            // pointed at the wrong endpoint.
+            //
+            // A signing failure is caught rather than raised, and this is the
+            // one place that is right. The transaction above has ALREADY
+            // committed, so the account exists. Reporting "registration
+            // failed" would be a lie that sends the member back to sign up
+            // again, where they would be told their phone is already taken and
+            // conclude the app is broken. Both apps already treat a null token
+            // as "go to the login screen", which is exactly where a member
+            // should be told that signing in is temporarily unavailable.
+            try {
+                $token = $this->issueToken($user);
+            } catch (ServiceUnavailableHttpException) {
+                $token = null;
+            }
 
             return [
                 'status' => 'success',
                 'message' => 'Registration successful.',
                 'user' => $user,
-                'token' => null,
+                'token' => $token,
             ];
         } catch (Exception $e) {
             return [
@@ -243,14 +266,83 @@ class AuthService
         // Update last login
         $user->updateLastLogin();
 
-        $token = JWTAuth::fromUser($user);
+        $token = $this->issueToken($user);
 
         return [
             'status' => 'success',
             'message' => 'Login successful.',
-            'user' => $user->load('member','agentProfile'),
+            'user' => $user->load('member', 'agentProfile'),
             'token' => $token,
         ];
+    }
+
+    /**
+     * Mint a JWT, and fail in a way somebody can act on.
+     *
+     * WHY THIS IS NOT JUST JWTAuth::fromUser()
+     *
+     * Every other statement on the login path returns a tidy
+     * `['status' => 'error']` array. This one call did not: it was bare, and
+     * it is the only thing in the whole public login flow that can throw. So a
+     * configuration problem here escaped as an uncaught exception, hit the
+     * `default` arm in bootstrap/app.php, and reached members as a flat
+     * HTTP 500 reading "An unexpected error occurred. The incident has been
+     * logged." — indistinguishable from a database outage, and impossible to
+     * diagnose from the phone.
+     *
+     * The overwhelmingly common cause is an empty JWT_SECRET. config/jwt.php
+     * is `env('JWT_SECRET')` with no default, and the Lcobucci provider throws
+     * while CONSTRUCTING its signer on an empty key — before any of the
+     * package's own error handling gets a chance to run. A deployment that
+     * never ran `php artisan jwt:secret`, or one whose config cache was built
+     * before the platform injected its environment variables, lands here.
+     *
+     * The tell is that registration kept working while login did not: register
+     * wrapped the same call in a try/catch and login did not.
+     *
+     * Callers that must not fail on a signing problem — register() and
+     * resetPassword(), which have both already committed a write by the time
+     * they get here — catch the exception and carry on with a null token.
+     * Nobody else should: a sign-in that cannot issue a token has not signed
+     * anybody in.
+     *
+     * Public because it is not only this class that mints sessions.
+     * MiniAppController does too, for sign-in through a bank's host app, and
+     * it had the same bare call. Every JWT this application issues to a member
+     * now comes through here, which is the only way the guarantee above holds.
+     *
+     * @throws ServiceUnavailableHttpException when a token cannot be signed
+     */
+    public function issueToken(User $user): string
+    {
+        try {
+            return JWTAuth::fromUser($user);
+        } catch (Throwable $e) {
+            $missingSecret = blank(config('jwt.secret'));
+
+            Log::error('Could not issue a JWT.', [
+                'user_id' => $user->id,
+                'jwt_secret_configured' => ! $missingSecret,
+                'exception' => $e::class,
+                'error' => $e->getMessage(),
+                'hint' => $missingSecret
+                    ? 'JWT_SECRET is empty. Run `php artisan jwt:secret`, then `php artisan optimize:clear`.'
+                    : 'JWT_SECRET is set, so this is not the usual cause. Read the exception above.',
+            ]);
+
+            // 503, not 500. This is a server that is configured wrong rather
+            // than a request that went wrong, and the distinction is the whole
+            // difference between "retry later" and "your password is wrong"
+            // for the person holding the phone.
+            //
+            // The specific cause goes to the log and, while debugging, to the
+            // response. It does NOT go to the response in production: on a
+            // public unauthenticated endpoint, "this server has no signing
+            // key" is free reconnaissance for anyone who asks politely.
+            throw new ServiceUnavailableHttpException(null, config('app.debug') && $missingSecret
+                ? 'Sign-in is unavailable: the server has no JWT_SECRET, so it cannot sign a login token. Run `php artisan jwt:secret` and then `php artisan optimize:clear`.'
+                : 'Sign-in is temporarily unavailable. Please try again shortly.', $e);
+        }
     }
 
     /**
@@ -297,11 +389,28 @@ class AuthService
 
         // Update last login
         $user->updateLastLogin();
-        $token = JWTAuth::fromUser($user);
+
+        // The third public token-minting path, and it had the same bare call
+        // that broke login. Hardening two of the three would have left the
+        // identical HTTP 500 waiting on the one route a locked-out member is
+        // most likely to reach for.
+        //
+        // Degraded rather than raised, for the same reason as register(): the
+        // password has ALREADY been changed by the update above. Reporting a
+        // failure here would send the member back to try again with their old
+        // password — which no longer works — and they would lock themselves
+        // out by drawing an entirely reasonable conclusion.
+        try {
+            $token = $this->issueToken($user);
+        } catch (ServiceUnavailableHttpException) {
+            $token = null;
+        }
 
         return [
             'status' => 'success',
-            'message' => 'Password reset successfully.',
+            'message' => $token === null
+                ? 'Password reset successfully. Please sign in with your new password.'
+                : 'Password reset successfully.',
             'token' => $token,
             'user' => $user->load('member'),
         ];
