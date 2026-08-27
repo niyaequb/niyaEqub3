@@ -55,6 +55,28 @@ class SettingsServiceProvider extends ServiceProvider
             EnvService::forgetCache();
         });
 
+        // THE HEALTH CHECK MUST NEVER TOUCH THE DATABASE.
+        //
+        // Everything below reads settings, and reading settings means a query.
+        // Running that unconditionally put a database round trip on the boot
+        // path of EVERY request — including GET /up, which is the endpoint the
+        // hosting platform polls to decide whether this instance is alive.
+        //
+        // That is a bad trade in exactly the situation it matters. If the
+        // database goes slow or unreachable, a health check that depends on it
+        // starts timing out; the platform concludes the instance is dead and
+        // pulls it out of rotation; and an application that was merely
+        // degraded starts answering nothing at all. The visible symptom is a
+        // 504 where there used to be a 500 — the app stops replying rather
+        // than replying with an error, which is strictly harder to diagnose.
+        //
+        // A health check answers one question: is this process alive and
+        // serving? Every dependency it acquires is another way for a working
+        // process to be declared dead.
+        if ($this->isHealthCheck()) {
+            return;
+        }
+
         $env = $this->app->make(EnvService::class);
 
         // One query, and on a deployment where nobody has saved anything yet,
@@ -67,6 +89,22 @@ class SettingsServiceProvider extends ServiceProvider
         $this->applyEqub($env);
         $this->applyFirebase($env);
         $this->applyGateways($env);
+    }
+
+    /**
+     * Is this the platform's health probe?
+     *
+     * The path comes from the `health:` argument in bootstrap/app.php. Read
+     * off the request rather than the router, because this runs during boot,
+     * before a route has been matched.
+     */
+    protected function isHealthCheck(): bool
+    {
+        if ($this->app->runningInConsole()) {
+            return false;
+        }
+
+        return trim((string) $this->app['request']->getPathInfo(), '/') === 'up';
     }
 
     protected function applyEqub(EnvService $env): void
