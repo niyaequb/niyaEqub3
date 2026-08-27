@@ -22,7 +22,17 @@ class StoreEqubPaymentRequest extends FormRequest
             'equb_membership_id' => ['required', 'exists:equb_memberships,id'],
             'amount' => ['required', 'numeric', 'min:0'],
             'payment_date' => ['required', 'date'],
-            'payment_method' => ['required', Rule::enum(EqubPaymentMethod::class)],
+            // selectable(), not the whole enum. Offline and manual are retired
+            // and their cases only survive so historical rows still cast —
+            // Rule::enum would happily accept them and let an operator create a
+            // contribution through a route that no longer exists.
+            'payment_method' => [
+                'required',
+                Rule::in(array_map(
+                    fn (EqubPaymentMethod $m): string => $m->value,
+                    EqubPaymentMethod::selectable()
+                )),
+            ],
         ];
     }
 }

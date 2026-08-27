@@ -17,6 +17,14 @@ class FcmService
     private $fcmUrl;
     public function __construct()
     {
+        // Lay the service account file down before anything goes looking for
+        // it. It is stored in the settings table and cached to storage/, and
+        // storage/ is rebuilt with the container on every deploy — so on the
+        // first notification after a release the file is simply not there yet.
+        // Restoring it here means every path-based check below keeps working
+        // exactly as written.
+        app(FirebaseCredentials::class)->path();
+
         $credentialsPath = config('services.firebase.credentials');
         $projectId = config('services.firebase.project_id') ?? env('FIREBASE_PROJECT_ID');
 
@@ -67,15 +75,13 @@ class FcmService
         private function getServiceAccountFromFile()
     {
         try {
-            $serviceAccountPath = storage_path('app/firebase/service-account.json');
+            // Restores the file from stored settings when the container does
+            // not have it, and returns null only when there are no credentials
+            // configured anywhere.
+            $serviceAccountPath = app(FirebaseCredentials::class)->path();
 
             if (!$serviceAccountPath) {
-                return null;
-            }
-
-            // Check if file exists
-            if (!file_exists($serviceAccountPath)) {
-                Log::warning("Firebase service account file not found: {$serviceAccountPath}");
+                Log::warning('No Firebase service account is configured. Upload one on the Settings page, under Firebase.');
                 return null;
             }
 

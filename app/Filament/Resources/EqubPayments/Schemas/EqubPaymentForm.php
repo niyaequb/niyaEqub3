@@ -34,16 +34,19 @@ class EqubPaymentForm
                     ->required(),
                 Select::make('payment_method')
                     ->label('Payment Method')
-                    ->options(collect(EqubPaymentMethod::cases())->mapWithKeys(
+                    // Only banks, and only ones that can currently take money.
+                    // Offline and manual were withdrawn; their enum cases
+                    // survive so historical rows still read, but they are not
+                    // offered here.
+                    ->options(collect(EqubPaymentMethod::selectable())->mapWithKeys(
                         fn (EqubPaymentMethod $m): array => [$m->value => $m->label()]
                     )->toArray())
-                    ->default(EqubPaymentMethod::Manual->value)
+                    ->default(EqubPaymentMethod::Dashen->value)
                     ->required()
-                    // Recording a bank payment here does NOT take any money: it
-                    // creates a pending row that only a verified settlement
-                    // notification can complete. Offline and manual are the
-                    // ones that settle on save.
-                    ->helperText('Offline and manual settle immediately. A bank method records a pending contribution that settles only when the bank confirms it.'),
+                    // Creating a row here does NOT take any money. It records a
+                    // contribution the member still has to authorise in the
+                    // bank's app.
+                    ->helperText('Records a pending contribution. No money moves until the member authorises it in the bank app and settlement is confirmed.'),
                 Select::make('status')
                     ->label('Status')
                     ->options(collect(EqubPaymentStatus::cases())->mapWithKeys(

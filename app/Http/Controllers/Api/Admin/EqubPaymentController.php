@@ -57,13 +57,14 @@ class EqubPaymentController extends Controller
 
     public function store(StoreEqubPaymentRequest $request): JsonResponse
     {
+        // Always pending. Nothing an operator records here has been collected
+        // yet — the member still has to authorise it in the bank's app.
+        //
+        // This used to settle offline and manual contributions on creation,
+        // which was correct when those meant cash already handed over. Both are
+        // withdrawn, and settling on creation with them would now assert that
+        // money arrived when nothing had been collected at all.
         $payment = EqubPayment::create(array_merge($request->validated(), ['status' => EqubPaymentStatus::Pending]));
-        // Asked of the method rather than of a list of names, so adding a bank
-        // never risks it being mistaken for something that settles on creation.
-        if ($payment->payment_method?->settlesImmediately()) {
-            $payment->update(['status' => EqubPaymentStatus::Paid]);
-            $this->sendPaymentSuccessNotification($payment);
-        }
 
         return response()->json([
             'status' => 'success',

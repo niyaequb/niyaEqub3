@@ -4,6 +4,7 @@ namespace App\Filament\Pages;
 
 use App\Models\GlobalSetting;
 use App\Services\EnvService;
+use App\Services\FirebaseCredentials;
 use App\Services\Payments\PaymentGatewayManager;
 use App\Services\SmsService;
 use Filament\Forms\Components\RichEditor;
@@ -95,18 +96,19 @@ class Settings extends Page implements HasForms
         $equbConfig = $this->getEnvService()->getEqubConfig();
         $firebaseConfig = $this->getEnvService()->getFirebaseConfig();
 
-        // Firebase data from file if exists
+        // Firebase service account, from the settings table with the file as a
+        // fallback. Reading the file alone was the bug: storage/ is rebuilt
+        // with the container on every deploy, so this tab went blank and the
+        // credentials looked lost when they had only ever been on that disk.
         $firebaseFileData = [];
-        $firebaseFilePath = storage_path('app/firebase/service-account.json');
-        if (file_exists($firebaseFilePath)) {
-            $json = json_decode(file_get_contents($firebaseFilePath), true);
-            if (is_array($json)) {
-                $firebaseFileData = [
-                    'firebase_client_email' => $json['client_email'] ?? '',
-                    'firebase_private_key_id' => $json['private_key_id'] ?? '',
-                    'firebase_service_account_path' => 'storage/app/firebase/service-account.json',
-                ];
-            }
+        $serviceAccount = app(FirebaseCredentials::class)->json();
+
+        if (is_array($serviceAccount)) {
+            $firebaseFileData = [
+                'firebase_client_email' => $serviceAccount['client_email'] ?? '',
+                'firebase_private_key_id' => $serviceAccount['private_key_id'] ?? '',
+                'firebase_service_account_path' => 'storage/app/firebase/service-account.json',
+            ];
         }
 
         $this->form->fill([
@@ -310,57 +312,152 @@ class Settings extends Page implements HasForms
             $gateways = app(PaymentGatewayManager::class)->all();
 
             if ($gateways === []) {
-                $schema[] = ComponentsSection::make('No banks registered')
-                    ->description('No payment gateway is registered in config/payments.php, so contributions cannot be collected through a bank. Offline and manual recording still work.')
-                    ->schema([]);
+                // An empty register has two very different causes and telling
+                // them apart is the difference between a one-line fix and an
+                // afternoon. The common one by far is a stale config cache:
+                // config/payments.php was added after `config:cache` last ran,
+                // so Laravel is serving a snapshot that predates it and every
+                // derived behaviour — this screen, validation, the provider
+                // list — sees no banks at all.
+                $fileExists = file_exists(config_path('payments.php'));
+                $isCached = app()->configurationIsCached();
+
+                if ($fileExists && $isCached) {
+                    $schema[] = ComponentsSection::make('Configuration cache is stale')
+                        ->description(
+                            'config/payments.php exists, but Laravel is serving a cached configuration built before it was added, so no bank is visible. '
+                            .'Run: php artisan optimize:clear '
+                            .'— use optimize:clear rather than config:clear, because the route cache is stale for the same reason and the settlement notification route (POST /payment/{provider}/notification) and the provider list (GET /api/payments/providers) will 404 until it is rebuilt.'
+                        )
+                        ->schema([]);
+                } elseif (! $fileExists) {
+                    $schema[] = ComponentsSection::make('config/payments.php is missing')
+                        ->description('The gateway register does not exist, so no bank can be configured. Restore config/payments.php — it is the only place a bank is named.')
+                        ->schema([]);
+                } else {
+                    $schema[] = ComponentsSection::make('No banks registered')
+                        ->description('config/payments.php loaded but its `gateways` array is empty, so contributions cannot be collected through a bank. Offline and manual recording still work. Check storage/logs for "registered but not usable" — a bank whose gateway class is missing is skipped and logged rather than taking down the ones that work.')
+                        ->schema([]);
+                }
             }
 
             foreach ($gateways as $slug => $gateway) {
                 $f = fn (string $key): string => 'gw_'.$slug.'_'.$key;
 
-                $status = $gateway->isConfigured()
+                // Every field names the environment variable it corresponds
+                // to. With one bank that is a nicety; with ten it is the
+                // difference between reading this screen and guessing, because
+                // DASHEN_APP_SECRET and CBE_APP_SECRET look identical here and
+                // are not.
+                //
+                // Note what the named key now IS: a fallback, not the store.
+                // Saving on this screen writes to the settings table, because
+                // this application runs on a host that rebuilds its container
+                // from the build image on every deploy and a value written to
+                // a file there survives until the next restart and no longer.
+                // The environment variable is still read when nothing has been
+                // saved — that is how a fresh deployment boots, and how an
+                // operator who would rather keep secrets in the platform
+                // dashboard than the database can.
+                $prefix = config("payments.gateways.{$slug}.env_prefix", strtoupper($slug));
+                $env = fn (string $key, string $text): string => $prefix.'_'.strtoupper($key).' — '.$text;
+
+                // Naming what is missing, not just that something is. "Credentials
+                // are incomplete" sends someone hunting across fourteen fields;
+                // "missing App Secret" does not.
+                $cfg = $this->getEnvService()->getGatewayConfig($prefix);
+
+                $missing = [];
+                foreach ([
+                    'MERCHANT_CODE' => 'Merchant Code',
+                    'MINI_APP_CODE' => 'Mini App Code',
+                    'APP_SECRET' => 'App Secret',
+                ] as $key => $label) {
+                    if (trim((string) ($cfg[$key] ?? '')) === '') {
+                        $missing[] = $label;
+                    }
+                }
+
+                if (trim((string) ($cfg['PUBLIC_KEY'] ?? '')) === '') {
+                    $keyPath = trim((string) ($cfg['PUBLIC_KEY_PATH'] ?? ''));
+
+                    if ($keyPath === '') {
+                        $missing[] = 'RSA Public Key';
+                    } else {
+                        $resolved = str_starts_with($keyPath, DIRECTORY_SEPARATOR) || preg_match('/^[A-Za-z]:/', $keyPath)
+                            ? $keyPath
+                            : base_path($keyPath);
+
+                        // A path pointing at nothing is the likeliest mistake
+                        // here, and the least obvious from the form alone.
+                        if (! is_readable($resolved)) {
+                            $missing[] = 'RSA Public Key (no file at '.$keyPath.')';
+                        }
+                    }
+                }
+
+                $status = $missing === []
                     ? ($gateway->canVerifySettlement()
-                        ? 'Live. Orders can be signed and settlement can be confirmed with the bank.'
-                        : 'Taking payments, but settlement CANNOT be confirmed — contributions will stay pending until the order query endpoint below is set.')
-                    : 'Not available to members. Credentials are incomplete, so this bank is withheld from the app rather than offered and then failing.';
+                        ? 'LIVE. Orders can be signed and settlement can be confirmed with the bank.'
+                        : 'Orders can be signed, but settlement CANNOT be confirmed — contributions will stay pending until the order query endpoint below is set.')
+                    : 'NOT AVAILABLE to members — missing '.implode(', ', $missing)
+                        .'. This bank is withheld from the apps rather than offered and then failing when someone tries to pay.';
 
                 $schema[] = ComponentsSection::make($gateway->displayName())
                     ->description($status.' Everything in this section is signing material: changing a value invalidates every order signed with the old one, so payments start failing immediately rather than gradually.')
                     ->schema([
+                        // Read-only, and here because the bank asks for it during
+                        // onboarding. Built from APP_URL so it is right for this
+                        // environment rather than something to be typed from
+                        // memory into a form at the bank.
+                        \Filament\Forms\Components\Placeholder::make($f('notify_url'))
+                            ->label('Settlement notification URL')
+                            ->content(rtrim((string) config('app.url'), '/').'/payment/'.$slug.'/notification')
+                            ->helperText('Give this to '.$gateway->displayName().'. They POST here when a charge concludes. It must be reachable from the public internet — a localhost URL will never be called.')
+                            ->columnSpanFull(),
                         TextInput::make($f('merchant_code'))
                             ->label('Merchant Code')
-                            ->helperText('Sent as biz_content.merch_code and payee_identifier.')
+                            ->helperText($env('merchant_code', 'sent as biz_content.merch_code and payee_identifier'))
                             ->maxLength(64),
                         TextInput::make($f('mini_app_code'))
                             ->label('Mini App Code')
-                            ->helperText('The appid on every order, and the appcode the mini app presents when signing in.')
+                            ->helperText($env('mini_app_code', 'the appid on every order, and the appcode the mini app presents when signing in'))
                             ->maxLength(64),
                         TextInput::make($f('merchant_app_id'))
                             ->label('Merchant App ID')
+                            ->helperText($env('merchant_app_id', 'from the credential sheet'))
                             ->maxLength(64),
                         TextInput::make($f('fabric_app_id'))
                             ->label('Fabric App ID')
+                            ->helperText($env('fabric_app_id', 'used when exchanging a customer identifier for a session'))
                             ->maxLength(64),
                         TextInput::make($f('short_code'))
                             ->label('Short Code')
+                            ->helperText($env('short_code', 'from the credential sheet'))
                             ->maxLength(64),
                         Select::make($f('stage'))
                             ->label('Stage')
                             ->options(['uat' => 'UAT', 'production' => 'Production'])
                             ->default('uat')
-                            ->helperText('Signed into every request, so it must match the stage the app runs against. A mismatch is rejected by the bank, not ignored.'),
+                            ->helperText($env('stage', 'signed into every request, so it must match the stage the app runs against. A mismatch is rejected by the bank, not ignored')),
                         TextInput::make($f('app_secret'))
                             ->label('App Secret')
                             ->password()
                             ->revealable()
                             ->dehydrated()
-                            ->helperText('Signs confirmpayload and is presented to the bank app as xAPiKey.')
+                            ->helperText($env('app_secret', 'signs confirmpayload and is presented to the bank app as xAPiKey'))
                             ->maxLength(255),
                         Textarea::make($f('public_key'))
-                            ->label('RSA Public Key')
-                            ->rows(8)
-                            ->helperText('Paste the whole PEM block, BEGIN and END lines included. Encrypts the signed portion of each order.')
+                            ->label('RSA Public Key — paste here')
+                            ->rows(6)
+                            ->helperText($env('public_key', 'RECOMMENDED on a hosted deployment. Paste the whole PEM block, BEGIN and END lines included — line breaks and stray spaces are normalised on save. Stored in the settings table, so it survives a redeploy.'))
                             ->columnSpanFull(),
+                        TextInput::make($f('public_key_path'))
+                            ->label('RSA Public Key — file path (alternative)')
+                            ->placeholder('storage/app/payments/'.$slug.'-public.pem')
+                            ->helperText($env('public_key_path', 'Used only when the box above is empty. Good on a machine with a persistent disk; on a container host it will not resolve, because storage/app/payments is gitignored — correctly, signing material does not belong in a repository — and so the file is in no build image. Relative paths are from the project root.'))
+                            ->columnSpanFull()
+                            ->maxLength(255),
                     ])
                     ->columns(2);
 
@@ -369,35 +466,47 @@ class Settings extends Page implements HasForms
                 // not, and the consequence of leaving it empty is specific
                 // enough to be worth stating where someone will read it.
                 $schema[] = ComponentsSection::make($gateway->displayName().' — server endpoints and signing')
-                    ->description('While the order query path is empty, settlement verification fails closed for this bank: notifications are logged, contributions stay pending, and nobody is credited for money that has not been confirmed.')
+                    ->description(
+                        $gateway->canVerifySettlement()
+                            ? 'AUTOMATIC. Settlement is confirmed with the bank and contributions are credited without anyone intervening.'
+                            : 'OPTIONAL, AND CURRENTLY UNSET — which means settlement is MANUAL for this bank. '
+                                .'These are only needed if the bank exposes a server-to-server API; where it does not, the super-app does all the talking and there is nothing for this server to call. '
+                                .'The consequence is real either way: with no way to ask the bank whether a charge completed, contributions stay PENDING until an operator checks the bank\'s merchant portal and marks them paid under Equb Payments. '
+                                .'Nothing is credited on the app\'s say-so, because the app cannot prove money moved.'
+                    )
                     ->schema([
                         TextInput::make($f('base_url'))
                             ->label('API Base URL')
                             ->url()
                             ->placeholder('https://...')
-                            ->maxLength(255),
-                        TextInput::make($f('token_path'))
-                            ->label('Customer Token Path')
-                            ->placeholder('e.g. /payment/v1/token')
-                            ->helperText('Exchanges a customer identifier for a session token. Enables sign-in through the bank app.')
+                            ->helperText($env('base_url', 'root of the bank\'s merchant API. The two paths below are appended to it'))
+                            ->columnSpanFull()
                             ->maxLength(255),
                         TextInput::make($f('order_query_path'))
                             ->label('Order Query Path')
                             ->placeholder('e.g. /payment/v1/query')
-                            ->helperText('Confirms whether a transaction settled. Required before any contribution can be marked paid.')
+                            ->helperText($env('order_query_path', 'confirms whether a transaction settled. REQUIRED before any contribution can be marked paid'))
+                            ->maxLength(255),
+                        TextInput::make($f('token_path'))
+                            ->label('Customer Token Path')
+                            ->placeholder('e.g. /payment/v1/token')
+                            ->helperText($env('token_path', 'exchanges a customer identifier for a session token. Enables sign-in through the bank app; without it members sign in with phone and OTP as usual'))
                             ->maxLength(255),
                         TextInput::make($f('sign_keys'))
                             ->label('Signed Fields')
-                            ->helperText('Comma-separated, dot notation. RSA can only encrypt ~214 bytes, which is less than the whole request, so only a subset is signed. Confirm the exact list with the bank. Leave empty to use the default.')
+                            ->placeholder('timestamp,nonce_str,method,version,biz_content')
+                            ->helperText($env('sign_keys', 'comma-separated, dot notation. How much fits depends on the key: a 2048-bit key allows ~214 bytes and forces a minimal subset, a 4096-bit key allows ~470 and the whole request fits. Confirm the exact list with the bank — their sample calls it keysToPick and does not say what is in it. Leave empty for the default'))
                             ->columnSpanFull()
                             ->maxLength(512),
                         Select::make($f('rsa_padding'))
                             ->label('RSA Padding')
                             ->options(['oaep' => 'OAEP (Node default)', 'pkcs1' => 'PKCS#1 v1.5'])
-                            ->default('oaep'),
+                            ->default('oaep')
+                            ->helperText($env('rsa_padding', 'match what the bank decrypts with')),
                         TextInput::make($f('timeout_express'))
                             ->label('Order Timeout')
                             ->placeholder('120m')
+                            ->helperText($env('timeout_express', 'how long the bank holds the order open'))
                             ->maxLength(16),
                     ])
                     ->columns(2);
@@ -857,24 +966,22 @@ class Settings extends Page implements HasForms
 
                     if ($jsonPath) {
                         $tempPath = \Illuminate\Support\Facades\Storage::disk('local')->path($jsonPath);
-                        $targetDir = storage_path('app/firebase');
-                        $targetPath = $targetDir . DIRECTORY_SEPARATOR . 'service-account.json';
 
                         if (file_exists($tempPath)) {
-                            if (!is_dir($targetDir)) {
-                                mkdir($targetDir, 0755, true);
-                            }
+                            // Stored in the settings table, and written to
+                            // storage/ as a cache of it. Copying into storage/
+                            // and stopping there was the old behaviour, and it
+                            // lost the credentials on every deploy without
+                            // saying anything: the tab came back empty and
+                            // push notifications simply stopped.
+                            app(FirebaseCredentials::class)
+                                ->store((string) file_get_contents($tempPath));
 
-                            // Overwrite existing file by copying
-                            if (copy($tempPath, $targetPath)) {
-                                // Keep path consistent for EnvService
-                                $firebaseConfig['credentials'] = 'storage/app/firebase/service-account.json';
-                                // Clean up the temporary uploaded file
-                                unlink($tempPath);
-                                Log::info("Firebase credentials updated at $targetPath");
-                            } else {
-                                throw new \Exception("Failed to save credentials to $targetPath. Check permissions.");
-                            }
+                            $firebaseConfig['credentials'] = 'storage/app/firebase/service-account.json';
+
+                            unlink($tempPath);
+
+                            Log::info('Firebase service account stored.');
                         }
                     }
                 }

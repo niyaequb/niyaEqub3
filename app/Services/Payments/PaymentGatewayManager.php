@@ -144,16 +144,19 @@ class PaymentGatewayManager
     /**
      * Payment methods a member may submit.
      *
-     * Enabled banks, plus the two that involve no gateway at all. Validation
-     * is built from this rather than hardcoded, so a bank becomes payable the
-     * moment its credentials are in place and stops being payable the moment
-     * they are removed.
+     * Enabled banks, and nothing else. Offline and manual collection were
+     * withdrawn — every contribution now goes through a bank — so there is no
+     * longer a route that records one as settled without money having moved.
+     *
+     * Built from the register rather than hardcoded, so a bank becomes payable
+     * the moment its credentials are in place and stops being payable the
+     * moment they are removed.
      *
      * @return array<int, string>
      */
     public function acceptedMethods(): array
     {
-        return array_merge($this->enabledSlugs(), ['offline', 'manual']);
+        return $this->enabledSlugs();
     }
 
     /**

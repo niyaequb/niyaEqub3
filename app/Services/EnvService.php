@@ -2,76 +2,277 @@
 
 namespace App\Services;
 
+use App\Models\GlobalSetting;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Log;
+use Throwable;
 
+/**
+ * Runtime settings an administrator can change from the Settings page.
+ *
+ * WHY THIS IS NOT A .ENV FILE ANY MORE
+ *
+ * It was, and on a single long-lived server that is fine: the file is there,
+ * it is writable, and it survives a restart. Niya does not run on one of
+ * those. It runs on DigitalOcean App Platform, where the container is rebuilt
+ * from the build image on every deploy, every restart and every scale event.
+ * Three consequences, any one of which is fatal on its own:
+ *
+ *   1. A file written at runtime lives until the next restart and no longer.
+ *   2. `.env` is not in the image at all — it is gitignored, correctly, and
+ *      creating one by hand in the web console creates it in that one
+ *      container.
+ *   3. The platform injects real environment variables, and Laravel's dotenv
+ *      is immutable: it never overwrites a variable that is already set. So
+ *      even a `.env` that somehow persisted would be ignored for every key
+ *      configured in the platform dashboard.
+ *
+ * The symptom of all three is identical and quietly awful — the page says
+ * "saved successfully" and the value is gone on the next page load.
+ *
+ * So the store of record is the database: the one writable, shared, durable
+ * thing this application already has, and the same `global_settings` table the
+ * Legal, Support, Social and App Version tabs have always used.
+ *
+ * RESOLUTION ORDER
+ *
+ *   stored value (database)  →  environment variable  →  caller's default
+ *
+ * A stored empty string counts as "not set" and falls through. That is what
+ * makes clearing a field in the admin panel do the obvious thing — hand the
+ * key back to the platform's environment variable, or to the default — rather
+ * than pinning it to empty forever.
+ *
+ * The environment stays in the chain deliberately. It is how a fresh
+ * deployment boots before anyone has opened the Settings page, how secrets can
+ * be kept in the platform dashboard instead of the database if an operator
+ * prefers, and how local development keeps working from a plain `.env`.
+ */
 class EnvService
 {
+    /**
+     * The `group` these rows carry in `global_settings`.
+     */
+    public const GROUP = 'env';
+
+    /**
+     * Prefix on the stored `key`.
+     *
+     * `global_settings.key` is unique across every tab, and MySQL's default
+     * collation is case-insensitive — so an environment key `APP_VERSION`
+     * and an App Version tab field `app_version` are the same row. Without
+     * this prefix, saving one would silently overwrite the other.
+     */
+    protected const KEY_PREFIX = 'env:';
+
     protected string $envPath;
+
+    /**
+     * Stored overrides, read once per request.
+     *
+     * Static rather than per-instance: FabricGateway alone asks for a dozen
+     * keys while building a single order, and every service that reads a
+     * setting resolves its own EnvService. One query per request, not per
+     * question.
+     *
+     * @var array<string, string>|null
+     */
+    protected static ?array $stored = null;
 
     public function __construct()
     {
         $this->envPath = base_path('.env');
     }
 
+    // ---------------------------------------------------------------------
+    // Reading
+    // ---------------------------------------------------------------------
+
     /**
-     * Get value from .env file
+     * Resolve a setting: stored value, then environment, then default.
      */
     public function get(string $key, ?string $default = null): ?string
     {
-        $value = env($key, $default);
-        return $value;
+        $stored = static::stored();
+
+        if (isset($stored[$key]) && $stored[$key] !== '') {
+            return $stored[$key];
+        }
+
+        return env($key, $default);
     }
 
     /**
-     * Set value in .env file
+     * Every stored override, keyed without the storage prefix.
+     *
+     * @return array<string, string>
+     */
+    public function all(): array
+    {
+        return static::stored();
+    }
+
+    /**
+     * Load the stored overrides for this request.
+     *
+     * @return array<string, string>
+     */
+    protected static function stored(): array
+    {
+        if (static::$stored !== null) {
+            return static::$stored;
+        }
+
+        try {
+            $rows = GlobalSetting::query()
+                ->where('group', self::GROUP)
+                ->pluck('value', 'key')
+                ->all();
+        } catch (Throwable $e) {
+            // No database yet. This is the normal state during `migrate` on a
+            // fresh deployment, and the abnormal one when the connection is
+            // down. Either way the environment is still readable, so the
+            // application boots on it rather than trading a missing setting
+            // for a white screen.
+            return static::$stored = [];
+        }
+
+        $settings = [];
+
+        foreach ($rows as $key => $value) {
+            if (! str_starts_with((string) $key, self::KEY_PREFIX)) {
+                continue;
+            }
+
+            $settings[substr((string) $key, strlen(self::KEY_PREFIX))] = (string) $value;
+        }
+
+        return static::$stored = $settings;
+    }
+
+    /**
+     * Drop the per-request memo.
+     *
+     * Only needed by tests and by long-running workers that must pick up a
+     * change made by the web process mid-run.
+     */
+    public static function forgetCache(): void
+    {
+        static::$stored = null;
+    }
+
+    // ---------------------------------------------------------------------
+    // Writing
+    // ---------------------------------------------------------------------
+
+    /**
+     * Persist one setting.
+     *
+     * Returns false rather than throwing so a caller can report which keys
+     * failed; setMultiple() turns that into an exception, because a settings
+     * form that reports success over a failed write is worse than one that
+     * reports an error.
      */
     public function set(string $key, ?string $value): bool
     {
-        if (!File::exists($this->envPath)) {
+        $value = (string) ($value ?? '');
+
+        try {
+            GlobalSetting::updateOrCreate(
+                ['key' => self::KEY_PREFIX.$key],
+                ['value' => $value, 'group' => self::GROUP],
+            );
+        } catch (Throwable $e) {
+            Log::error('Could not persist setting', [
+                'key' => $key,
+                'error' => $e->getMessage(),
+            ]);
+
             return false;
         }
 
-        $envContent = File::get($this->envPath);
+        // Keep this request consistent with what was just written.
+        static::stored();
+        static::$stored[$key] = $value;
 
-        // Escape value if it contains special characters or spaces
-        $escapedValue = $value;
-        if (preg_match('/[#\s"\'\\\\]/', $value) || empty($value)) {
-            $escapedValue = '"' . addslashes($value) . '"';
-        }
-
-        // Check if key exists (handle both quoted and unquoted values)
-        if (preg_match("/^{$key}=(.*)/m", $envContent)) {
-            // Update existing key
-            $envContent = preg_replace(
-                "/^{$key}=.*/m",
-                "{$key}={$escapedValue}",
-                $envContent
-            );
-        } else {
-            // Add new key at the end
-            $envContent .= "\n{$key}={$escapedValue}";
-        }
-
-        File::put($this->envPath, $envContent);
-
-        // Update the environment variable in current process
         putenv("{$key}={$value}");
         $_ENV[$key] = $value;
         $_SERVER[$key] = $value;
 
+        // Mirror into .env where there is one and it is writable, so a
+        // developer editing settings locally still sees them in the file they
+        // expect. Best effort by design: on App Platform there is no .env, and
+        // failing to write a mirror must never fail the save.
+        $this->mirrorToEnvFile($key, $value);
+
         return true;
     }
 
     /**
-     * Set multiple values at once
+     * Persist several settings, or fail loudly.
+     *
+     * @param  array<string, string|null>  $values
+     *
+     * @throws \RuntimeException if any key could not be written
      */
     public function setMultiple(array $values): bool
     {
+        $failed = [];
+
         foreach ($values as $key => $value) {
-            $this->set($key, $value ?? '');
+            if (! $this->set($key, $value ?? '')) {
+                $failed[] = $key;
+            }
+        }
+
+        if ($failed !== []) {
+            throw new \RuntimeException(
+                'Could not save '.implode(', ', $failed).'. '
+                .'The settings table could not be written — check the database '
+                .'connection and that migrations have run.'
+            );
         }
 
         return true;
+    }
+
+    /**
+     * Write the key into the local .env file, if that is a thing that exists.
+     */
+    protected function mirrorToEnvFile(string $key, string $value): void
+    {
+        // A real newline in a .env value throws InvalidFileException out of
+        // phpdotenv at boot, which takes the whole application down and is
+        // very hard to trace back to a settings save. Values that carry one —
+        // a PEM block, say — live in the database only.
+        if (str_contains($value, "\n") || str_contains($value, "\r")) {
+            return;
+        }
+
+        try {
+            if (! File::exists($this->envPath) || ! is_writable($this->envPath)) {
+                return;
+            }
+
+            $envContent = File::get($this->envPath);
+
+            // Quote anything with whitespace or a comment marker in it, and
+            // quote empties so the line reads as deliberately blank.
+            $escapedValue = $value;
+            if (preg_match('/[#\s"\'\\\\]/', $value) || $value === '') {
+                $escapedValue = '"'.addslashes($value).'"';
+            }
+
+            $pattern = '/^'.preg_quote($key, '/').'=.*/m';
+
+            $envContent = preg_match($pattern, $envContent)
+                ? preg_replace($pattern, $key.'='.$escapedValue, $envContent)
+                : rtrim($envContent, "\r\n")."\n".$key.'='.$escapedValue."\n";
+
+            File::put($this->envPath, $envContent);
+        } catch (Throwable $e) {
+            Log::debug('Skipped .env mirror', ['key' => $key, 'error' => $e->getMessage()]);
+        }
     }
 
     /**
@@ -100,7 +301,7 @@ class EnvService
         }
 
         // Returned with real line breaks. The literal backslash-n form is
-        // purely an .env storage detail — a single line cannot hold a PEM
+        // purely a storage detail — a single .env line cannot hold a PEM
         // block — and nothing reading this config should have to know it.
         $values['PUBLIC_KEY'] = str_replace('\n', "\n", $values['PUBLIC_KEY']);
 
@@ -286,4 +487,3 @@ class EnvService
         return $this->setMultiple($values);
     }
 }
-

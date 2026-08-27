@@ -12,7 +12,6 @@ use App\Models\EqubPayment;
 use App\Services\Payments\EqubOrderService;
 use App\Services\Payments\PaymentGatewayManager;
 use App\Services\Payments\PaymentSettlementService;
-use App\Services\SmsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -210,7 +209,7 @@ class EqubPaymentController extends Controller
 
         $paymentMethod = EqubPaymentMethod::from($method);
 
-        if ($paymentMethod->isGateway()) {
+        if ($paymentMethod->isSelectable()) {
             $gateways = app(PaymentGatewayManager::class);
             $gateway = $gateways->get($method);
 
@@ -273,23 +272,19 @@ class EqubPaymentController extends Controller
             ], 201);
         }
 
-        $payment = EqubPayment::create([
-            'equb_membership_id' => $membership->id,
-            'amount' => $amount,
-            'payment_date' => $paymentDate,
-            'payment_method' => $paymentMethod,
-            'status' => EqubPaymentStatus::Pending,
-        ]);
-        // Offline and manual involve no bank, so there is nothing to wait for.
-        $payment->markAsPaid();
-        app(\App\Services\EqubMembershipService::class)->completeIfEligible($membership);
-        $this->sendPaymentSuccessNotification($payment);
-
+        // Unreachable in practice — StoreEqubPaymentRequest only accepts
+        // enabled banks — and deliberately a refusal rather than a fallback.
+        //
+        // What used to stand here created the contribution and immediately
+        // marked it PAID, because offline and manual involved no bank and had
+        // nothing to wait for. Those methods are withdrawn, and with them the
+        // only route by which this endpoint could record money as received
+        // without a bank confirming it. If validation and this enum ever drift
+        // apart, the safe direction is to refuse, not to settle.
         return response()->json([
-            'status' => 'success',
-            'message' => 'Payment recorded. It may require admin approval.',
-            'data' => new EqubPaymentResource($payment->load(['membership.member.user', 'membership.sponsor.user', 'membership.equbGroup.package'])),
-        ], 201);
+            'status' => 'error',
+            'message' => 'That payment method is no longer available.',
+        ], 422);
     }
 
     /**
@@ -374,10 +369,16 @@ class EqubPaymentController extends Controller
             ], 422);
         }
 
-        $isOnline = $paymentMethod->isGateway();
-        $gateway = $isOnline ? $gateways->tryGet($method) : null;
+        if (! $paymentMethod->isSelectable()) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'That payment method is no longer available.',
+            ], 422);
+        }
 
-        if ($isOnline && ! $gateway) {
+        $gateway = $gateways->tryGet($method);
+
+        if (! $gateway) {
             // The method is a known bank but not one we can currently take
             // money through — usually credentials missing on this environment.
             // Refused before any row is created, so nothing is left pending
@@ -408,22 +409,6 @@ class EqubPaymentController extends Controller
                 'status' => 'error',
                 'message' => 'Could not start this payment. Please try again.',
             ], 500);
-        }
-
-        // Offline and manual settle immediately, exactly as the single path does.
-        if (! $isOnline) {
-            foreach ($payments as $payment) {
-                $payment->markAsPaid();
-                app(\App\Services\EqubMembershipService::class)->completeIfEligible($payment->membership);
-            }
-
-            $this->sendBatchSuccessNotification($member, $total, $payments->count());
-
-            return response()->json([
-                'status' => 'success',
-                'message' => 'Payment recorded. It may require admin approval.',
-                'data' => EqubPaymentResource::collection($payments),
-            ], 201);
         }
 
         $result = app(EqubOrderService::class)
@@ -465,40 +450,13 @@ class EqubPaymentController extends Controller
         }
     }
 
-    protected function sendBatchSuccessNotification($member, float $total, int $count): void
-    {
-        $phone = $member->user?->phone;
-
-        if (! $phone) {
-            return;
-        }
-
-        $message = $count > 1
-            ? 'Your Equb payment of '.number_format($total, 2).' ETB covering '.$count
-                .' contributions has been received successfully.'
-            : 'Your Equb payment of '.number_format($total, 2).' ETB has been received successfully.';
-
-        app(SmsService::class)->sendSms($phone, $message, null, null);
-    }
-
-    protected function sendPaymentSuccessNotification(EqubPayment $payment): void
-    {
-        $membership = $payment->membership;
-
-        // The receipt goes to whoever paid. On a place held for someone else
-        // that is the sponsor, who is also the only one of the two with a
-        // phone number to text.
-        $phone = $membership?->payerUser()?->phone;
-
-        if (! $phone) {
-            return;
-        }
-
-        $message = $membership->isResponsibilitySeat()
-            ? 'Your Equb payment of '.$payment->amount.' ETB for '.$membership->displayName()
-                .' has been received successfully.'
-            : 'Your Equb payment of '.$payment->amount.' ETB has been received successfully.';
-
-        app(SmsService::class)->sendSms($phone, $message, null, $payment);
-    }
+    // The two receipt helpers that stood here are gone with offline and manual
+    // collection. They fired the moment a contribution was recorded, which was
+    // right when recording one meant cash had already changed hands.
+    //
+    // Nothing on this controller settles a contribution any more, so nothing
+    // here should be telling a member their money has been received. That
+    // message now belongs to exactly one place — PaymentSettlementService,
+    // after the bank has confirmed — and it sends one receipt per payer rather
+    // than one per contribution.
 }

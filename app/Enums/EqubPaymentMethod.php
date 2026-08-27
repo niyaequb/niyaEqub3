@@ -3,86 +3,95 @@
 namespace App\Enums;
 
 /**
- * How a contribution was collected.
+ * Which bank collected a contribution.
  *
- * Each bank gets its own case, and the case VALUE is the gateway slug used
- * everywhere else — config/payments.php, the API, the client apps. Dashen is
- * the only one live today; CBE, Awash and the rest follow the same pattern.
- *
- * ADDING A BANK
- *
- * Add a case here, then follow the checklist in config/payments.php. This enum
- * and that config file are the only two places a bank is named. Validation,
- * the admin filter and the API's provider list are all derived, so a case with
- * no configured gateway behind it is simply never offered rather than being
- * offered and failing.
+ * Every contribution goes through a bank. Dashen is live; CBE, Awash and the
+ * rest follow the same pattern — a case here, then the checklist in
+ * config/payments.php.
  *
  * WHY THE VALUES CAN NEVER CHANGE
  *
  * They are stored verbatim in equb_payments.payment_method and carried by
  * every historical row. Renaming one would orphan every contribution collected
- * through it. `chapa` was rewritten to `dashen` by the 2026_08_27_000001
- * migration precisely so that no unknown value survives to be cast here.
- *
- * There is deliberately no `Chapa` case: a stray 'chapa' in the column would
- * now be data corruption and should fail loudly on cast rather than being
- * quietly accepted.
+ * through it.
  */
 enum EqubPaymentMethod: string
 {
     // ----- Banks -------------------------------------------------------
     case Dashen = 'dashen';
 
-    // ----- No gateway involved -----------------------------------------
+    // ----- Retired -----------------------------------------------------
 
-    /** Cash or a transfer recorded by an agent. Settles on creation. */
+    /**
+     * @deprecated Cash recorded by an agent. Withdrawn — cannot be created.
+     */
     case Offline = 'offline';
 
-    /** Recorded by an operator in the admin panel. Settles on creation. */
+    /**
+     * @deprecated Recorded by an operator. Withdrawn — cannot be created.
+     */
     case Manual = 'manual';
 
     /**
-     * Whether this method goes through a bank.
+     * Methods a contribution may actually be created with.
      *
-     * The distinction that matters operationally: a gateway payment is created
-     * pending and settles asynchronously on a verified notification, while
-     * offline and manual are settled the moment they are recorded. Reports and
-     * reconciliation should split on this rather than on a list of bank names,
-     * which would need editing every time a bank is added.
+     * Offline and manual are deliberately absent. They were withdrawn as a
+     * collection route: every contribution now goes through a bank, so nothing
+     * in the admin panel, the API or the apps offers them.
+     *
+     * THE CASES REMAIN, AND THAT IS NOT AN OVERSIGHT. `payment_method` is cast
+     * to this enum, and PHP throws on casting a value the enum does not have.
+     * Deleting them would take out every screen that lists a contribution
+     * collected before the change — the member's history, the admin register,
+     * the reports — not just the payment path. Rewriting those rows to
+     * `dashen` instead would be worse: it would state that a bank collected
+     * money that was handed over in cash, which is a lie told to whoever
+     * reconciles the account later.
+     *
+     * So they are tombstones. Old rows read correctly; new ones cannot be
+     * made.
+     *
+     * @return array<int, self>
      */
-    public function isGateway(): bool
+    public static function selectable(): array
+    {
+        return array_values(array_filter(
+            self::cases(),
+            fn (self $m): bool => $m->isSelectable()
+        ));
+    }
+
+    /** Whether a new contribution may be created with this method. */
+    public function isSelectable(): bool
     {
         return ! in_array($this, [self::Offline, self::Manual], true);
     }
 
-    /** Settles the instant it is recorded, with no bank round trip. */
-    public function settlesImmediately(): bool
-    {
-        return ! $this->isGateway();
-    }
-
     /**
-     * Every bank case.
+     * Whether this method goes through a bank.
      *
-     * @return array<int, self>
+     * True for every selectable method. Kept as its own question because the
+     * two are distinct: `isSelectable()` is a policy about what may be created
+     * now, this is a fact about how the money moved, and reports reading
+     * historical rows care about the second.
      */
-    public static function gateways(): array
+    public function isGateway(): bool
     {
-        return array_values(array_filter(
-            self::cases(),
-            fn (self $m): bool => $m->isGateway()
-        ));
+        return $this->isSelectable();
     }
 
     /**
      * A display label, preferring the bank's configured name.
      *
-     * Falls back to the case name so a bank that is registered in the enum but
-     * not yet in config still reads sensibly in the admin panel instead of
-     * showing a bare slug.
+     * Retired methods are marked so a historical row is never mistaken for
+     * something still on offer.
      */
     public function label(): string
     {
+        if (! $this->isSelectable()) {
+            return $this->name.' (retired)';
+        }
+
         return config("payments.gateways.{$this->value}.name") ?? $this->name;
     }
 }

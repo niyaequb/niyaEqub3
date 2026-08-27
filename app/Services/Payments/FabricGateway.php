@@ -91,12 +91,32 @@ abstract class FabricGateway implements PaymentGateway
             }
         }
 
-        // Either form of the key counts. Checked for presence only — whether it
-        // actually parses is discovered when an order is signed, and failing
-        // there gives a specific OpenSSL reason rather than the flat "this bank
-        // is unavailable" that failing here would produce.
-        return trim((string) $this->setting('PUBLIC_KEY')) !== ''
-            || trim((string) $this->setting('PUBLIC_KEY_PATH')) !== '';
+        // Either form of the key counts, but a PATH is only good if the file is
+        // actually there.
+        //
+        // Checking that the file EXISTS, not that it parses. The difference
+        // matters: a path pointing at nothing is a setup step somebody has not
+        // done yet, and treating that bank as available would offer it to
+        // members and fail at the moment one of them tried to pay — the exact
+        // outcome this method exists to prevent. Whether the bytes in the file
+        // are a valid key is a different question, discovered when an order is
+        // signed, where the OpenSSL reason is far more useful than a flat
+        // "this bank is unavailable".
+        if (trim((string) $this->setting('PUBLIC_KEY')) !== '') {
+            return true;
+        }
+
+        $path = trim((string) $this->setting('PUBLIC_KEY_PATH'));
+
+        if ($path === '') {
+            return false;
+        }
+
+        $resolved = str_starts_with($path, DIRECTORY_SEPARATOR) || preg_match('/^[A-Za-z]:/', $path)
+            ? $path
+            : base_path($path);
+
+        return is_readable($resolved);
     }
 
     public function canVerifySettlement(): bool
@@ -121,28 +141,34 @@ abstract class FabricGateway implements PaymentGateway
     /**
      * The RSA public key issued at onboarding.
      *
-     * PREFERS A FILE, AND THAT IS THE POINT.
+     * TWO SOURCES, AND WHICH ONE TO USE WHERE.
      *
-     * A PEM block is multi-line and a .env value is not: dotenv reads line by
-     * line, so pasting a real key straight into .env captures the first line
-     * and parses the remaining ten as malformed entries. That fails at boot if
-     * you are lucky and truncates the key silently if you are not. Every one
-     * of these integrations gets it wrong once.
+     * {PREFIX}_PUBLIC_KEY_PATH points at a .pem file holding the key exactly
+     * as the bank sent it. That is the right answer on a developer machine and
+     * on any server with a persistent disk, and it is how this codebase
+     * already handles the Firebase service account.
      *
-     * So {PREFIX}_PUBLIC_KEY_PATH points at a .pem file and the key is pasted
-     * into it exactly as the bank sent it. That is also how this codebase
-     * already handles the Firebase service account, and it keeps signing
-     * material out of .env.example, which is committed.
+     * It is the WRONG answer on a container host. storage/app/payments is
+     * gitignored — correctly, signing material does not belong in a repository
+     * — which also means the file is in no build image, so on App Platform,
+     * Heroku or any similar platform the path resolves to nothing on every
+     * deploy.
      *
-     * {PREFIX}_PUBLIC_KEY still works for a single-line value with literal
-     * backslash-n escapes, because that is what the admin Settings screen
-     * writes. Whatever the source, the body is stripped of ALL whitespace and
-     * the PEM is rebuilt: a key pasted with spaces at the wrap points is
-     * common and OpenSSL will not read it otherwise.
+     * There, the inline key is the one that works. {PREFIX}_PUBLIC_KEY is
+     * stored in the settings table by the admin Settings page, so it survives
+     * a redeploy, and the escaping problem that once made inline storage a bad
+     * idea — a PEM is multi-line, a .env value is not, and dotenv would
+     * truncate it at the first line break — no longer applies now that the
+     * store of record is a database column rather than a file.
+     *
+     * Whatever the source, the body is stripped of ALL whitespace and the PEM
+     * is rebuilt: a key pasted with spaces at the wrap points is common and
+     * OpenSSL will not read it otherwise.
      */
     protected function publicKey(): string
     {
         $key = '';
+        $unreadablePath = null;
 
         $path = trim((string) $this->setting('PUBLIC_KEY_PATH'));
 
@@ -151,13 +177,25 @@ abstract class FabricGateway implements PaymentGateway
                 ? $path
                 : base_path($path);
 
-            if (! is_readable($resolved)) {
-                throw new \RuntimeException(
-                    $this->displayName().' public key file is not readable: '.$resolved
-                );
-            }
+            if (is_readable($resolved)) {
+                $key = (string) file_get_contents($resolved);
+            } else {
+                // Not fatal on its own, and it used to be. A missing file is
+                // the normal state on a container host, where the deployment
+                // carries no storage/ contents; refusing to sign in that case
+                // meant a bank that was fully configured in the admin panel
+                // still could not take a payment, with no way to fix it from
+                // the panel. If an inline key is set, it is used. If neither
+                // resolves, the throw below names both — "no key at all" and
+                // "the path you set points at nothing" send you to different
+                // places.
+                $unreadablePath = $resolved;
 
-            $key = (string) file_get_contents($resolved);
+                Log::warning('Payment gateway public key file is not readable; falling back to the inline key.', [
+                    'gateway' => $this->slug(),
+                    'path' => $resolved,
+                ]);
+            }
         }
 
         if (trim($key) === '') {
@@ -168,7 +206,12 @@ abstract class FabricGateway implements PaymentGateway
 
         if ($key === '') {
             throw new \RuntimeException(
-                $this->displayName().' public key is not configured.'
+                $unreadablePath === null
+                    ? $this->displayName().' public key is not configured.'
+                    : $this->displayName().' public key is not configured: there is no readable file at '
+                        .$unreadablePath.' and no inline key either. On a container host, paste the PEM into '
+                        .'the inline field on the Settings page — that is stored in the database and survives '
+                        .'a redeploy, which a file under storage/ does not.'
             );
         }
 
@@ -216,16 +259,27 @@ abstract class FabricGateway implements PaymentGateway
      * WHY A SUBSET, AND WHY IT IS CONFIGURABLE
      *
      * The vendor sample calls `pickKeys(body, keysToPick)` before encrypting
-     * and never says what `keysToPick` contains. It cannot be the whole
-     * request: RSA encrypts at most (modulus − padding) bytes in one
-     * operation, which for a 2048-bit key under OAEP is 214. `biz_content`
-     * alone is larger. So a subset is forced by the maths, and only the bank
-     * can confirm which one.
+     * and never says what `keysToPick` contains, so {PREFIX}_SIGN_KEYS holds
+     * it — dot notation, comma separated.
      *
-     * {PREFIX}_SIGN_KEYS therefore holds it, dot notation, comma separated.
-     * The default is the smallest set that identifies the transaction — order
-     * id, amount, merchant, plus the nonce and timestamp that stop it being
-     * replayed.
+     * HOW BIG THE SUBSET CAN BE DEPENDS ON THE KEY, AND THAT CHANGED THE
+     * DEFAULT.
+     *
+     * RSA encrypts at most (modulus − padding) bytes in one operation. On a
+     * 2048-bit key under OAEP that is 214, which is smaller than `biz_content`
+     * alone and forces a genuinely minimal subset. Dashen issued a 4096-bit
+     * key, where the cap is ~470 — and a full request is around 420. It fits.
+     *
+     * That matters because the sample passes the WHOLE request in
+     * (`encryptPayload({...req})`). If `pickKeys` existed to shrink the
+     * payload they would have handed it a subset already; spreading everything
+     * in reads far more like a whitelist of the top-level keys that exist at
+     * that point — which is all of them, since `sign`, `stage` and
+     * `confirmpayload` are set afterwards.
+     *
+     * So the default is now the complete request object rather than the
+     * minimal set that a 2048-bit key would have forced. Still a reading of an
+     * ambiguous sample, not a confirmed spec: check it with the bank.
      *
      * Oversized input throws rather than being chunked. Chunked RSA produces
      * ciphertext a single-shot decrypt cannot read, and that failure would
@@ -279,10 +333,19 @@ abstract class FabricGateway implements PaymentGateway
         return base64_encode($encrypted);
     }
 
-    /** Fields signed into `sign` when the bank has not told us otherwise. */
+    /**
+     * Fields signed into `sign` when the bank has not told us otherwise.
+     *
+     * Every top-level key that exists at signing time — i.e. the whole request
+     * object, matching `encryptPayload({...req})` in the vendor sample.
+     *
+     * A bank on a 2048-bit key cannot fit this and must override with a
+     * narrower list; encryptPayload() throws with that instruction rather than
+     * truncating.
+     */
     protected function defaultSignKeys(): string
     {
-        return 'biz_content.merch_order_id,biz_content.total_amount,biz_content.merch_code,timestamp,nonce_str';
+        return 'timestamp,nonce_str,method,version,biz_content';
     }
 
     /**
