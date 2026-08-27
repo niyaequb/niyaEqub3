@@ -22,7 +22,7 @@ use Illuminate\Support\Facades\Log;
 /**
  * Lifecycle of a member-created Equb group: create, invite, join, start.
  *
- * Everything downstream (contributions, Chapa, commissions, reminders) is the
+ * Everything downstream (contributions, bank settlement, commissions, reminders) is the
  * existing platform machinery — a group Equb is an EqubGroup with an owner.
  */
 class MemberEqubGroupService

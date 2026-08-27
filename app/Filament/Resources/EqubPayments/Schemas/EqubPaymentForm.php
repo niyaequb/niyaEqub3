@@ -35,10 +35,15 @@ class EqubPaymentForm
                 Select::make('payment_method')
                     ->label('Payment Method')
                     ->options(collect(EqubPaymentMethod::cases())->mapWithKeys(
-                        fn (EqubPaymentMethod $m): array => [$m->value => $m->name]
+                        fn (EqubPaymentMethod $m): array => [$m->value => $m->label()]
                     )->toArray())
                     ->default(EqubPaymentMethod::Manual->value)
-                    ->required(),
+                    ->required()
+                    // Recording a bank payment here does NOT take any money: it
+                    // creates a pending row that only a verified settlement
+                    // notification can complete. Offline and manual are the
+                    // ones that settle on save.
+                    ->helperText('Offline and manual settle immediately. A bank method records a pending contribution that settles only when the bank confirms it.'),
                 Select::make('status')
                     ->label('Status')
                     ->options(collect(EqubPaymentStatus::cases())->mapWithKeys(

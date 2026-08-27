@@ -4,6 +4,7 @@ namespace App\Filament\Pages;
 
 use App\Models\GlobalSetting;
 use App\Services\EnvService;
+use App\Services\Payments\PaymentGatewayManager;
 use App\Services\SmsService;
 use Filament\Forms\Components\RichEditor;
 use Filament\Forms\Components\RichEditor\RichContentRenderer;
@@ -79,7 +80,16 @@ class Settings extends Page implements HasForms
 
     public function mount(): void
     {
-        $dashenConfig = $this->getEnvService()->getDashenConfig();
+        // One flat bag of gw_{slug}_{key} fields, built from whatever banks
+        // are registered. Filament's form state is flat, and prefixing by slug
+        // is what keeps Dashen's app secret and CBE's from colliding in it.
+        $gatewayFields = [];
+        foreach (app(PaymentGatewayManager::class)->all() as $slug => $gateway) {
+            $prefix = config("payments.gateways.{$slug}.env_prefix", strtoupper($slug));
+            foreach ($this->getEnvService()->getGatewayConfig($prefix) as $key => $value) {
+                $gatewayFields['gw_'.$slug.'_'.strtolower($key)] = $value;
+            }
+        }
         $afroConfig = $this->getEnvService()->getAfroConfig();
         $geezConfig = $this->getEnvService()->getGeezConfig();
         $equbConfig = $this->getEnvService()->getEqubConfig();
@@ -100,18 +110,8 @@ class Settings extends Page implements HasForms
         }
 
         $this->form->fill([
-            // Payment - Dashen Bank SuperApp
-            'dashen_merchant_code' => $dashenConfig['DASHEN_MERCHANT_CODE'] ?? '',
-            'dashen_merchant_app_id' => $dashenConfig['DASHEN_MERCHANT_APP_ID'] ?? '',
-            'dashen_fabric_app_id' => $dashenConfig['DASHEN_FABRIC_APP_ID'] ?? '',
-            'dashen_mini_app_code' => $dashenConfig['DASHEN_MINI_APP_CODE'] ?? '',
-            'dashen_short_code' => $dashenConfig['DASHEN_SHORT_CODE'] ?? '',
-            'dashen_app_secret' => $dashenConfig['DASHEN_APP_SECRET'] ?? '',
-            'dashen_public_key' => $dashenConfig['DASHEN_PUBLIC_KEY'] ?? '',
-            'dashen_stage' => $dashenConfig['DASHEN_STAGE'] ?? 'uat',
-            'dashen_base_url' => $dashenConfig['DASHEN_BASE_URL'] ?? '',
-            'dashen_token_path' => $dashenConfig['DASHEN_TOKEN_PATH'] ?? '',
-            'dashen_order_query_path' => $dashenConfig['DASHEN_ORDER_QUERY_PATH'] ?? '',
+            // Payment — one set of fields per registered bank.
+            ...$gatewayFields,
             // AFRO SMS
             'afro_api_key' => $afroConfig['AFRO_API_KEY'] ?? '',
             'afro_identifier_id' => $afroConfig['AFRO_IDENTIFIER_ID'] ?? '',
@@ -300,78 +300,108 @@ class Settings extends Page implements HasForms
     {
         $schema = [];
 
-        // Payment Tab - Dashen Bank SuperApp
+        // Payment Tab - one pair of sections per registered bank.
+        //
+        // Built from PaymentGatewayManager rather than written out per bank, so
+        // adding CBE or Awash puts a complete, correct settings panel on this
+        // screen with no edit here. A hand-written panel per bank is how the
+        // tenth one ends up missing the field that was added ninth.
         if ($this->activeTab === 'payment') {
-            $schema[] = ComponentsSection::make('Dashen Bank SuperApp')
-                ->description('Mini app credentials issued by Dashen Bank at onboarding. Everything here is signing material — changing a value invalidates every order signed with the old one, so payments will start failing immediately rather than gradually.')
-                ->schema([
-                    TextInput::make('dashen_merchant_code')
-                        ->label('Merchant Code')
-                        ->helperText('Sent as biz_content.merch_code and payee_identifier.')
-                        ->required()
-                        ->maxLength(64),
-                    TextInput::make('dashen_mini_app_code')
-                        ->label('Mini App Code')
-                        ->helperText('The appid on every order, and the appcode the mini app presents when signing in.')
-                        ->required()
-                        ->maxLength(64),
-                    TextInput::make('dashen_merchant_app_id')
-                        ->label('Merchant App ID')
-                        ->maxLength(64),
-                    TextInput::make('dashen_fabric_app_id')
-                        ->label('Fabric App ID')
-                        ->maxLength(64),
-                    TextInput::make('dashen_short_code')
-                        ->label('Short Code')
-                        ->maxLength(64),
-                    Select::make('dashen_stage')
-                        ->label('Stage')
-                        ->options(['uat' => 'UAT', 'production' => 'Production'])
-                        ->default('uat')
-                        ->required()
-                        ->helperText('Signed into every request, so it must match the stage the mini app is running against. A mismatch is rejected by Dashen, not ignored.'),
-                    TextInput::make('dashen_app_secret')
-                        ->label('App Secret')
-                        ->password()
-                        ->revealable()
-                        ->required()
-                        ->dehydrated()
-                        ->helperText('Signs confirmpayload and is presented to the SuperApp as xAPiKey.')
-                        ->maxLength(255),
-                    Textarea::make('dashen_public_key')
-                        ->label('RSA Public Key')
-                        ->rows(8)
-                        ->required()
-                        ->helperText('Paste the whole PEM block, BEGIN and END lines included. Used to encrypt the signed portion of each order.')
-                        ->columnSpanFull(),
-                ])
-                ->columns(2);
+            $gateways = app(PaymentGatewayManager::class)->all();
 
-            // These three are separated deliberately. Everything above came on
-            // the credential sheet; nothing below did. Until Dashen supplies
-            // them, settlement cannot be verified and contributions stay
-            // pending rather than being credited on an unverifiable claim.
-            $schema[] = ComponentsSection::make('Dashen server endpoints')
-                ->description('Not supplied in the Dashen integration pack. While these are empty, settlement verification fails closed: notifications are logged, contributions stay pending, and nobody is credited for money that has not been confirmed.')
-                ->schema([
-                    TextInput::make('dashen_base_url')
-                        ->label('API Base URL')
-                        ->url()
-                        ->placeholder('https://...')
-                        ->helperText('Root of the Dashen SuperApp merchant API.')
-                        ->maxLength(255),
-                    TextInput::make('dashen_token_path')
-                        ->label('Fabric Token Path')
-                        ->placeholder('e.g. /payment/v1/token')
-                        ->helperText('Exchanges a customeridentifier for a fabric token. Enables Login with DBSA.')
-                        ->maxLength(255),
-                    TextInput::make('dashen_order_query_path')
-                        ->label('Order Query Path')
-                        ->placeholder('e.g. /payment/v1/query')
-                        ->helperText('Confirms whether a transaction settled. Required before any contribution can be marked paid.')
-                        ->maxLength(255),
-                ])
-                ->columns(1);
+            if ($gateways === []) {
+                $schema[] = ComponentsSection::make('No banks registered')
+                    ->description('No payment gateway is registered in config/payments.php, so contributions cannot be collected through a bank. Offline and manual recording still work.')
+                    ->schema([]);
+            }
+
+            foreach ($gateways as $slug => $gateway) {
+                $f = fn (string $key): string => 'gw_'.$slug.'_'.$key;
+
+                $status = $gateway->isConfigured()
+                    ? ($gateway->canVerifySettlement()
+                        ? 'Live. Orders can be signed and settlement can be confirmed with the bank.'
+                        : 'Taking payments, but settlement CANNOT be confirmed — contributions will stay pending until the order query endpoint below is set.')
+                    : 'Not available to members. Credentials are incomplete, so this bank is withheld from the app rather than offered and then failing.';
+
+                $schema[] = ComponentsSection::make($gateway->displayName())
+                    ->description($status.' Everything in this section is signing material: changing a value invalidates every order signed with the old one, so payments start failing immediately rather than gradually.')
+                    ->schema([
+                        TextInput::make($f('merchant_code'))
+                            ->label('Merchant Code')
+                            ->helperText('Sent as biz_content.merch_code and payee_identifier.')
+                            ->maxLength(64),
+                        TextInput::make($f('mini_app_code'))
+                            ->label('Mini App Code')
+                            ->helperText('The appid on every order, and the appcode the mini app presents when signing in.')
+                            ->maxLength(64),
+                        TextInput::make($f('merchant_app_id'))
+                            ->label('Merchant App ID')
+                            ->maxLength(64),
+                        TextInput::make($f('fabric_app_id'))
+                            ->label('Fabric App ID')
+                            ->maxLength(64),
+                        TextInput::make($f('short_code'))
+                            ->label('Short Code')
+                            ->maxLength(64),
+                        Select::make($f('stage'))
+                            ->label('Stage')
+                            ->options(['uat' => 'UAT', 'production' => 'Production'])
+                            ->default('uat')
+                            ->helperText('Signed into every request, so it must match the stage the app runs against. A mismatch is rejected by the bank, not ignored.'),
+                        TextInput::make($f('app_secret'))
+                            ->label('App Secret')
+                            ->password()
+                            ->revealable()
+                            ->dehydrated()
+                            ->helperText('Signs confirmpayload and is presented to the bank app as xAPiKey.')
+                            ->maxLength(255),
+                        Textarea::make($f('public_key'))
+                            ->label('RSA Public Key')
+                            ->rows(8)
+                            ->helperText('Paste the whole PEM block, BEGIN and END lines included. Encrypts the signed portion of each order.')
+                            ->columnSpanFull(),
+                    ])
+                    ->columns(2);
+
+                // Separated on purpose. The section above is what a bank hands
+                // over on its credential sheet; this one is what it often has
+                // not, and the consequence of leaving it empty is specific
+                // enough to be worth stating where someone will read it.
+                $schema[] = ComponentsSection::make($gateway->displayName().' — server endpoints and signing')
+                    ->description('While the order query path is empty, settlement verification fails closed for this bank: notifications are logged, contributions stay pending, and nobody is credited for money that has not been confirmed.')
+                    ->schema([
+                        TextInput::make($f('base_url'))
+                            ->label('API Base URL')
+                            ->url()
+                            ->placeholder('https://...')
+                            ->maxLength(255),
+                        TextInput::make($f('token_path'))
+                            ->label('Customer Token Path')
+                            ->placeholder('e.g. /payment/v1/token')
+                            ->helperText('Exchanges a customer identifier for a session token. Enables sign-in through the bank app.')
+                            ->maxLength(255),
+                        TextInput::make($f('order_query_path'))
+                            ->label('Order Query Path')
+                            ->placeholder('e.g. /payment/v1/query')
+                            ->helperText('Confirms whether a transaction settled. Required before any contribution can be marked paid.')
+                            ->maxLength(255),
+                        TextInput::make($f('sign_keys'))
+                            ->label('Signed Fields')
+                            ->helperText('Comma-separated, dot notation. RSA can only encrypt ~214 bytes, which is less than the whole request, so only a subset is signed. Confirm the exact list with the bank. Leave empty to use the default.')
+                            ->columnSpanFull()
+                            ->maxLength(512),
+                        Select::make($f('rsa_padding'))
+                            ->label('RSA Padding')
+                            ->options(['oaep' => 'OAEP (Node default)', 'pkcs1' => 'PKCS#1 v1.5'])
+                            ->default('oaep'),
+                        TextInput::make($f('timeout_express'))
+                            ->label('Order Timeout')
+                            ->placeholder('120m')
+                            ->maxLength(16),
+                    ])
+                    ->columns(2);
+            }
         }
 
         // SMS Tab
@@ -720,39 +750,53 @@ class Settings extends Page implements HasForms
 
             if ($this->activeTab === 'payment') {
             // Deliberately no $data in this log line. Everything on this tab is
-            // signing material, and an app secret or private-looking key in the
+            // signing material, and an app secret or private key in the
             // application log is a credential leak that outlives the request.
-            Log::info('Saving Dashen configuration');
+            Log::info('Saving payment gateway configuration');
 
-            foreach ([
-                'dashen_merchant_code' => 'Merchant Code',
-                'dashen_mini_app_code' => 'Mini App Code',
-                'dashen_app_secret' => 'App Secret',
-                'dashen_public_key' => 'RSA Public Key',
-            ] as $field => $label) {
-                if (empty($data[$field])) {
-                    Notification::make()
-                        ->title(__('filament.settings.validation_error'))
-                        ->body($label.' is required. Payments cannot be signed without it.')
-                        ->danger()
-                        ->send();
-                    return;
+            $manager = app(PaymentGatewayManager::class);
+            $incomplete = [];
+
+            foreach ($manager->all() as $slug => $gateway) {
+                $envPrefix = config("payments.gateways.{$slug}.env_prefix", strtoupper($slug));
+
+                $values = [];
+                foreach (array_keys(EnvService::GATEWAY_KEYS) as $key) {
+                    $field = 'gw_'.$slug.'_'.strtolower($key);
+
+                    // Only fields the form actually rendered are written, so a
+                    // key this screen does not show can never be blanked by
+                    // saving from it.
+                    if (array_key_exists($field, $data)) {
+                        $values[$key] = $data[$field];
+                    }
+                }
+
+                $this->getEnvService()->setGatewayConfig($envPrefix, $values);
+
+                // A bank left half-filled is saved, not rejected. Configuring
+                // several banks is a job done over days as credentials arrive,
+                // and refusing to save Dashen because CBE is blank would make
+                // this screen unusable. What it must not do is fail silently,
+                // so an incomplete bank is named and its consequence stated.
+                $missing = array_filter(
+                    ['MERCHANT_CODE', 'MINI_APP_CODE', 'APP_SECRET', 'PUBLIC_KEY'],
+                    fn (string $key): bool => trim((string) ($values[$key] ?? '')) === ''
+                );
+
+                if ($missing !== []) {
+                    $incomplete[] = $gateway->displayName();
                 }
             }
 
-            $this->getEnvService()->setDashenConfig([
-                'merchant_code' => $data['dashen_merchant_code'] ?? '',
-                'merchant_app_id' => $data['dashen_merchant_app_id'] ?? '',
-                'fabric_app_id' => $data['dashen_fabric_app_id'] ?? '',
-                'mini_app_code' => $data['dashen_mini_app_code'] ?? '',
-                'short_code' => $data['dashen_short_code'] ?? '',
-                'app_secret' => $data['dashen_app_secret'] ?? '',
-                'public_key' => $data['dashen_public_key'] ?? '',
-                'stage' => $data['dashen_stage'] ?? 'uat',
-                'base_url' => $data['dashen_base_url'] ?? '',
-                'token_path' => $data['dashen_token_path'] ?? '',
-                'order_query_path' => $data['dashen_order_query_path'] ?? '',
-            ]);
+            if ($incomplete !== []) {
+                Notification::make()
+                    ->title('Saved, with banks still incomplete')
+                    ->body(implode(', ', $incomplete).' cannot take payments yet and will not be offered in the app. Members can still pay through any bank that is fully configured.')
+                    ->warning()
+                    ->persistent()
+                    ->send();
+            }
             } elseif ($this->activeTab === 'sms') {
                 if ($this->smsTab === 'afro') {
                     Log::info('Saving AFRO SMS configuration', ['data' => $data]);

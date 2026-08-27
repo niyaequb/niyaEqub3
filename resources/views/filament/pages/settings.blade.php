@@ -81,7 +81,7 @@
         </div>
 
         @if($activeTab === 'payment')
-            <!-- Payment Tab - Chapa Configuration -->
+            <!-- Payment Tab - one section per registered bank, from config/payments.php -->
             <form wire:submit="save">
                 {{ $this->form }}
                 <div class="mt-8 flex justify-end">

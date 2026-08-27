@@ -69,18 +69,29 @@ Route::get('promotions', [\App\Http\Controllers\Api\PromoController::class, 'ind
 
 /*
 |--------------------------------------------------------------------------
-| Dashen SuperApp mini-app
+| Payments
 |--------------------------------------------------------------------------
 |
-| "Login with DBSA". Public by necessity: it is what the member presents
-| INSTEAD of a session, so requiring one would be circular. The customer
-| identifier it accepts is verified with Dashen before anything is issued.
+| Which banks a member can pay through, and signing in through a bank's host
+| app. Both are public, and both are provider-parameterised so that adding
+| CBE or Awash changes config rather than routes.
 |
-| The settlement notification is registered in routes/web.php rather than
-| here — Dashen posts it outside the /api prefix.
+| `providers` is public because the app draws its payment options before a
+| member has necessarily signed in, and nothing it returns is privileged.
+|
+| `identify` is public by necessity: it is what the member presents INSTEAD
+| of a session, so requiring one would be circular. The customer identifier
+| it accepts is verified with the bank before any token is issued.
+|
+| Settlement notifications are registered in routes/web.php — the banks post
+| them outside the /api prefix.
 |
 */
-Route::post('miniapp/get-identifier', [\App\Http\Controllers\Api\MiniAppController::class, 'getIdentifier']);
+Route::prefix('payments')->group(function () {
+    Route::get('providers', [\App\Http\Controllers\Api\PaymentProviderController::class, 'index']);
+    Route::post('{provider}/identify', [\App\Http\Controllers\Api\MiniAppController::class, 'identify'])
+        ->where('provider', '[a-z0-9_]+');
+});
 
 
 // Protected routes (require Sanctum authentication)
@@ -114,7 +125,7 @@ Route::middleware(['jwt.auth', 'active.user'])->group(function () {
         Route::post('equb-groups/{equbGroup}/run-draw', [EqubGroupController::class, 'runDraw']);
         Route::apiResource('equb-memberships', EqubMembershipController::class);
         Route::apiResource('equb-payments', EqubPaymentController::class);
-        Route::post('equb-payments/{equbPayment}/initiate-dashen', [EqubPaymentController::class, 'initiateDashen']);
+        Route::post('equb-payments/{equbPayment}/initiate-gateway', [EqubPaymentController::class, 'initiateGateway']);
         Route::get('equb-draws', [EqubDrawController::class, 'index']);
         Route::get('equb-draws/{equbDraw}', [EqubDrawController::class, 'show']);
 

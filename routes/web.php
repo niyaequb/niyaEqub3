@@ -45,18 +45,28 @@ Route::get('/admin/locale/{locale}', function ($locale) {
 
 /*
 |--------------------------------------------------------------------------
-| Dashen settlement notification
+| Bank settlement notifications
 |--------------------------------------------------------------------------
 |
-| Posted by Dashen when a charge concludes. It sits outside the /api prefix,
-| is exempt from CSRF verification, and must be reachable from the public
-| internet. There is no bearer token on it — integrity comes from the
-| HMAC-SHA256 signature over the raw body, checked in DashenService.
+| Posted by a bank when a charge concludes. One route serves every bank —
+| {provider} says which — so adding CBE or Awash needs no route change, only
+| a block in config/payments.php.
+|
+| It sits outside the /api prefix, is exempt from CSRF verification, and must
+| be reachable from the public internet. There is no bearer token on it:
+| integrity comes from an HMAC-SHA256 signature over the raw body, checked by
+| the gateway the {provider} names.
+|
+| The parameter is constrained to lowercase letters and digits. Without it the
+| segment would be free text reaching a config lookup, and the log line that
+| records a miss would carry whatever an unauthenticated caller chose to put
+| there.
 |
 */
-Route::post('/payment/dashen/notification', [MemberEqubPaymentController::class, 'notification'])
+Route::post('/payment/{provider}/notification', [MemberEqubPaymentController::class, 'notification'])
+    ->where('provider', '[a-z0-9_]+')
     ->withoutMiddleware([VerifyCsrfToken::class])
-    ->name('payment.dashen.notification');
+    ->name('payment.notification');
 
 /*
 |--------------------------------------------------------------------------

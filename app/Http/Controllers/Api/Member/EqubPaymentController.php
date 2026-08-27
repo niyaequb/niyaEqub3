@@ -9,6 +9,9 @@ use App\Http\Requests\Api\Member\StoreEqubPaymentRequest;
 use App\Http\Resources\Api\EqubPaymentResource;
 use App\Models\EqubMembership;
 use App\Models\EqubPayment;
+use App\Services\Payments\EqubOrderService;
+use App\Services\Payments\PaymentGatewayManager;
+use App\Services\Payments\PaymentSettlementService;
 use App\Services\SmsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -19,11 +22,15 @@ use Illuminate\Support\Str;
 /**
  * Contribution collection for members.
  *
- * Every contribution is collected through the Dashen Bank SuperApp. A record is created in
- * the `pending` state together with a signed order payload, and becomes `paid` only once
- * Dashen's settlement notification has been received and independently verified. Neither
- * the 201 response nor the SuperApp's own callback into the mini-app is proof of
- * settlement — the mini-app must poll this controller's `show` endpoint.
+ * Contributions are collected through a bank. Which bank is the caller's choice from the
+ * list at GET /api/payments/providers — Dashen today, CBE and Awash to follow — and this
+ * controller names none of them: it asks PaymentGatewayManager what is available and
+ * EqubOrderService to sign the order.
+ *
+ * A record is created in the `pending` state together with a signed order payload, and
+ * becomes `paid` only once the bank's settlement notification has been received AND
+ * independently confirmed with that bank. Neither the 201 response nor the bank app's own
+ * callback into the client is proof of settlement — the client must poll `show`.
  *
  * Scope follows the money: a member sees and pays their own contributions and every
  * contribution on a place they sponsor for someone without an account.
@@ -100,42 +107,74 @@ class EqubPaymentController extends Controller
 
 
     /**
-     * Dashen's settlement notification.
+     * A bank's settlement notification.
      *
-     * Signature-verified, no bearer token. Resolution is delegated wholesale to
-     * DashenService rather than being half-done here: the old implementation
-     * looked the payment up by `reference` before handing over, which meant a
-     * batch notification — whose reference is a `batch_reference` — was
-     * rejected with a 404 before the handler that knows how to resolve it ever
-     * ran. One place decides what a reference means.
+     * One route serves every bank; `{provider}` says which. Signature-verified,
+     * no bearer token.
+     *
+     * Resolution is delegated wholesale to PaymentSettlementService rather than
+     * being half-done here. The implementation this replaced looked the payment
+     * up by `reference` before handing over, which meant a batch notification —
+     * whose reference is a `batch_reference` — was rejected with a 404 before
+     * the handler that knows how to resolve it ever ran. One place decides what
+     * a reference means.
      *
      * The RAW body is passed through for the HMAC. Re-encoding `$request->all()`
      * would change key order and whitespace and break a valid signature.
      */
-    public function notification(Request $request): JsonResponse
-    {
+    public function notification(
+        Request $request,
+        string $provider,
+        PaymentGatewayManager $gateways,
+        PaymentSettlementService $settlement,
+    ): JsonResponse {
+        $gateway = $gateways->tryGet($provider);
+
+        if (! $gateway) {
+            // 404, not 400: nothing about this request is retryable, and a bank
+            // posting to a provider we do not run is a routing mistake on one
+            // side or the other that someone needs to see.
+            Log::warning('Settlement notification for an unknown provider', [
+                'provider' => $provider,
+            ]);
+
+            return response()->json(['status' => 'error', 'message' => 'Unknown payment provider.'], 404);
+        }
+
         $payload = $request->all();
 
-        Log::info('Received Dashen notification: '.json_encode($payload));
+        Log::info("Received {$provider} settlement notification: ".json_encode($payload));
+
+        // Banks disagree about what to call this header, and rename it without
+        // warning. Each gateway lists the names it may use; the first present
+        // is the one checked.
+        $signature = null;
+        foreach ($gateway->signatureHeaders() as $header) {
+            if ($value = $request->header($header)) {
+                $signature = $value;
+                break;
+            }
+        }
 
         try {
-            $result = app(\App\Services\DashenService::class)->handleNotificationForEqubPayment(
+            $result = $settlement->settle(
+                $gateway,
                 $payload,
-                $request->header('x-dashen-signature') ?? $request->header('x-api-signature'),
+                $signature,
                 $request->getContent(),
             );
 
             // 200 even when the charge itself failed: the notification was
-            // handled correctly, and a non-200 tells Dashen to retry a delivery
-            // that has nothing left to do. Settlement is never inferred from
-            // this status code.
+            // handled correctly, and a non-200 tells the bank to retry a
+            // delivery that has nothing left to do. Settlement is never
+            // inferred from this status code.
             return response()->json([
                 'status' => $result['success'] ? 'success' : 'error',
                 'message' => $result['message'] ?? 'Notification processed.',
             ]);
         } catch (\Throwable $e) {
-            // A 500 here is a real processing failure and Dashen should retry.
-            Log::error('Dashen notification processing failed: '.$e->getMessage());
+            // A 500 here is a real processing failure and the bank should retry.
+            Log::error("{$provider} notification processing failed: ".$e->getMessage());
 
             return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
         }
@@ -169,7 +208,12 @@ class EqubPaymentController extends Controller
         $amount = (float) $request->input('amount');
         $paymentDate = $request->input('payment_date');
 
-        if ($method === EqubPaymentMethod::Dashen->value) {
+        $paymentMethod = EqubPaymentMethod::from($method);
+
+        if ($paymentMethod->isGateway()) {
+            $gateways = app(PaymentGatewayManager::class);
+            $gateway = $gateways->get($method);
+
             // The charge is signed server-side, so the signed amount had better
             // be the amount that is actually owed. The client still sends one —
             // it is what the member saw on the confirmation screen — but a
@@ -196,22 +240,16 @@ class EqubPaymentController extends Controller
                 'equb_membership_id' => $membership->id,
                 'amount' => $due,
                 'payment_date' => $paymentDate,
-                'payment_method' => EqubPaymentMethod::Dashen,
+                'payment_method' => $paymentMethod,
                 'status' => EqubPaymentStatus::Pending,
             ]);
 
-            try {
-                $result = app(\App\Services\DashenService::class)->createEqubOrder($payment);
-            } catch (\Throwable $e) {
+            $result = app(EqubOrderService::class)->createFor($payment, $gateway);
+
+            if (! ($result['success'] ?? false)) {
                 // Nothing was charged, so the pending row must not be left
                 // behind looking like money the member still owes. Same rule
                 // the batch path has always followed.
-                $payment->delete();
-
-                return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
-            }
-
-            if (! ($result['success'] ?? false)) {
                 $payment->delete();
 
                 return response()->json([
@@ -222,13 +260,15 @@ class EqubPaymentController extends Controller
 
             return response()->json([
                 'status' => 'success',
-                'message' => 'Payment initiated. Confirm it in the Dashen SuperApp.',
+                'message' => 'Payment initiated. Confirm it in the '.$gateway->displayName().' app.',
                 'data' => new EqubPaymentResource($payment->load(['membership.equbGroup.package'])),
-                // Handed straight to window.dashenbanksuperapp.send as the
-                // `orderPayload` of an initiatePayment call. Opaque to the
-                // client: it is signed, and altering any field invalidates it.
+                'provider' => $gateway->slug(),
+                // Handed straight to the bank's bridge as the `orderPayload` of
+                // an initiatePayment call. Opaque to the client: it is signed,
+                // and altering any field invalidates it.
                 'order_payload' => $result['order_payload'],
                 'auth_payload' => $result['auth_payload'],
+                'client' => $result['client'],
                 'reference' => $result['reference'],
             ], 201);
         }
@@ -237,9 +277,10 @@ class EqubPaymentController extends Controller
             'equb_membership_id' => $membership->id,
             'amount' => $amount,
             'payment_date' => $paymentDate,
-            'payment_method' => $method === EqubPaymentMethod::Offline->value ? EqubPaymentMethod::Offline : EqubPaymentMethod::Manual,
+            'payment_method' => $paymentMethod,
             'status' => EqubPaymentStatus::Pending,
         ]);
+        // Offline and manual involve no bank, so there is nothing to wait for.
         $payment->markAsPaid();
         app(\App\Services\EqubMembershipService::class)->completeIfEligible($membership);
         $this->sendPaymentSuccessNotification($payment);
@@ -276,7 +317,14 @@ class EqubPaymentController extends Controller
             'equb_membership_ids' => ['required', 'array', 'min:1', 'max:20'],
             'equb_membership_ids.*' => ['integer'],
             'payment_date' => ['required', 'date'],
-            'payment_method' => ['nullable', 'string'],
+            // Optional here, unlike the single path: omitting it means the
+            // platform default. Validated against the same live register, so a
+            // bank that is not currently payable is refused before any row is
+            // created.
+            'payment_method' => [
+                'nullable',
+                \Illuminate\Validation\Rule::in(app(PaymentGatewayManager::class)->acceptedMethods()),
+            ],
         ]);
 
         $ids = array_values(array_unique(array_map('intval', $data['equb_membership_ids'])));
@@ -310,21 +358,45 @@ class EqubPaymentController extends Controller
             ], 422);
         }
 
-        $method = $data['payment_method'] ?? EqubPaymentMethod::Dashen->value;
-        $isOnline = $method === EqubPaymentMethod::Dashen->value;
+        $gateways = app(PaymentGatewayManager::class);
+
+        // No provider named means the platform's default bank. Every current
+        // client names one; this is a compatibility floor, not a routing
+        // decision.
+        $method = $data['payment_method'] ?? (string) config('payments.default');
+
+        $paymentMethod = EqubPaymentMethod::tryFrom($method);
+
+        if (! $paymentMethod) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'That payment method is not available.',
+            ], 422);
+        }
+
+        $isOnline = $paymentMethod->isGateway();
+        $gateway = $isOnline ? $gateways->tryGet($method) : null;
+
+        if ($isOnline && ! $gateway) {
+            // The method is a known bank but not one we can currently take
+            // money through — usually credentials missing on this environment.
+            // Refused before any row is created, so nothing is left pending
+            // against a bank that was never going to be asked.
+            return response()->json([
+                'status' => 'error',
+                'message' => 'That bank is not available for payments right now.',
+            ], 422);
+        }
+
         $batchReference = 'EQUB-B'.strtoupper(Str::random(10));
 
         try {
-            $payments = DB::transaction(function () use ($memberships, $data, $method, $isOnline, $batchReference) {
+            $payments = DB::transaction(function () use ($memberships, $data, $paymentMethod, $batchReference) {
                 return $memberships->map(fn (EqubMembership $m): EqubPayment => EqubPayment::create([
                     'equb_membership_id' => $m->id,
                     'amount' => (float) $m->contribution_amount,
                     'payment_date' => $data['payment_date'],
-                    'payment_method' => $isOnline
-                        ? EqubPaymentMethod::Dashen
-                        : ($method === EqubPaymentMethod::Offline->value
-                            ? EqubPaymentMethod::Offline
-                            : EqubPaymentMethod::Manual),
+                    'payment_method' => $paymentMethod,
                     'status' => EqubPaymentStatus::Pending,
                     'batch_reference' => $batchReference,
                 ]));
@@ -354,14 +426,8 @@ class EqubPaymentController extends Controller
             ], 201);
         }
 
-        try {
-            $result = app(\App\Services\DashenService::class)
-                ->createEqubBatchOrder($payments->all(), $batchReference, $total);
-        } catch (\Throwable $e) {
-            $this->discardBatch($payments);
-
-            return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
-        }
+        $result = app(EqubOrderService::class)
+            ->createForBatch($payments->all(), $batchReference, $total, $gateway);
 
         if (! ($result['success'] ?? false)) {
             // Nothing was charged, so the pending rows must not be left behind
@@ -376,10 +442,12 @@ class EqubPaymentController extends Controller
 
         return response()->json([
             'status' => 'success',
-            'message' => 'Payment initiated. Confirm it in the Dashen SuperApp.',
+            'message' => 'Payment initiated. Confirm it in the '.$gateway->displayName().' app.',
             'data' => EqubPaymentResource::collection($payments),
+            'provider' => $gateway->slug(),
             'order_payload' => $result['order_payload'],
             'auth_payload' => $result['auth_payload'],
+            'client' => $result['client'],
             'reference' => $batchReference,
             // The authoritative sum to debit. Signed into the order, so the
             // client cannot re-add the individual amounts and arrive somewhere

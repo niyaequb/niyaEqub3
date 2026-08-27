@@ -75,58 +75,99 @@ class EnvService
     }
 
     /**
-     * Get all Dashen SuperApp env values.
+     * The settings one bank's gateway reads, keyed WITHOUT its prefix.
      *
-     * DASHEN_BASE_URL, DASHEN_TOKEN_PATH and DASHEN_ORDER_QUERY_PATH are the
-     * three Dashen has not yet supplied. They default empty, which makes
-     * DashenService fail closed rather than guess — see the comment on
-     * verifyPayment().
+     * Prefix-driven rather than a method per bank. Niya will collect through
+     * Dashen, CBE, Awash and more, and a getCbeConfig() beside a getAwashConfig()
+     * beside a getDashenConfig() would be the same dozen lines copied ten times,
+     * with the tenth copy quietly missing whichever key was added last.
+     *
+     * BASE_URL, TOKEN_PATH and ORDER_QUERY_PATH default empty on purpose. A
+     * gateway with no ORDER_QUERY_PATH reports canVerifySettlement() false and
+     * settlement fails closed rather than crediting a member on a claim nobody
+     * can confirm.
+     *
+     * @return array<string, string>
      */
-    public function getDashenConfig(): array
+    public function getGatewayConfig(string $prefix): array
     {
-        return [
-            'DASHEN_MERCHANT_CODE' => $this->get('DASHEN_MERCHANT_CODE', ''),
-            'DASHEN_MERCHANT_APP_ID' => $this->get('DASHEN_MERCHANT_APP_ID', ''),
-            'DASHEN_FABRIC_APP_ID' => $this->get('DASHEN_FABRIC_APP_ID', ''),
-            'DASHEN_MINI_APP_CODE' => $this->get('DASHEN_MINI_APP_CODE', ''),
-            'DASHEN_SHORT_CODE' => $this->get('DASHEN_SHORT_CODE', ''),
-            'DASHEN_APP_SECRET' => $this->get('DASHEN_APP_SECRET', ''),
-            // Returned with real line breaks. The literal \n form is purely an
-            // .env storage detail — a single line cannot hold a PEM block — and
-            // nothing that reads this config should have to know about it.
-            'DASHEN_PUBLIC_KEY' => str_replace('\n', "\n", (string) $this->get('DASHEN_PUBLIC_KEY', '')),
-            'DASHEN_STAGE' => $this->get('DASHEN_STAGE', 'uat'),
-            'DASHEN_BASE_URL' => $this->get('DASHEN_BASE_URL', ''),
-            'DASHEN_TOKEN_PATH' => $this->get('DASHEN_TOKEN_PATH', ''),
-            'DASHEN_ORDER_QUERY_PATH' => $this->get('DASHEN_ORDER_QUERY_PATH', ''),
-        ];
+        $prefix = strtoupper($prefix);
+
+        $values = [];
+
+        foreach (self::GATEWAY_KEYS as $key => $default) {
+            $values[$key] = (string) $this->get($prefix.'_'.$key, $default);
+        }
+
+        // Returned with real line breaks. The literal backslash-n form is
+        // purely an .env storage detail — a single line cannot hold a PEM
+        // block — and nothing reading this config should have to know it.
+        $values['PUBLIC_KEY'] = str_replace('\n', "\n", $values['PUBLIC_KEY']);
+
+        return $values;
     }
 
     /**
-     * Set Dashen SuperApp configuration.
+     * Write one bank's gateway settings.
      *
-     * The public key is stored with real newlines collapsed to literal \n, the
-     * only form a single .env line can carry. DashenService puts them back.
+     * Keys are given WITHOUT the prefix; it is applied here. Only keys actually
+     * present in $values are written, so a form rendering a subset of the
+     * fields cannot blank the ones it did not show.
+     *
+     * @param  array<string, string|null>  $values
      */
-    public function setDashenConfig(array $config): bool
+    public function setGatewayConfig(string $prefix, array $values): bool
     {
-        $publicKey = (string) ($config['public_key'] ?? '');
-        $publicKey = str_replace(["\r\n", "\r", "\n"], '\\n', $publicKey);
+        $prefix = strtoupper($prefix);
 
-        return $this->setMultiple([
-            'DASHEN_MERCHANT_CODE' => $config['merchant_code'] ?? '',
-            'DASHEN_MERCHANT_APP_ID' => $config['merchant_app_id'] ?? '',
-            'DASHEN_FABRIC_APP_ID' => $config['fabric_app_id'] ?? '',
-            'DASHEN_MINI_APP_CODE' => $config['mini_app_code'] ?? '',
-            'DASHEN_SHORT_CODE' => $config['short_code'] ?? '',
-            'DASHEN_APP_SECRET' => $config['app_secret'] ?? '',
-            'DASHEN_PUBLIC_KEY' => $publicKey,
-            'DASHEN_STAGE' => $config['stage'] ?? 'uat',
-            'DASHEN_BASE_URL' => $config['base_url'] ?? '',
-            'DASHEN_TOKEN_PATH' => $config['token_path'] ?? '',
-            'DASHEN_ORDER_QUERY_PATH' => $config['order_query_path'] ?? '',
-        ]);
+        $write = [];
+
+        foreach ($values as $key => $value) {
+            $key = strtoupper($key);
+
+            if (! array_key_exists($key, self::GATEWAY_KEYS)) {
+                continue;
+            }
+
+            $value = (string) ($value ?? '');
+
+            if ($key === 'PUBLIC_KEY') {
+                // Collapsed to literal backslash-n, the only form a single
+                // .env line can carry. getGatewayConfig() puts them back.
+                $value = str_replace(["\r\n", "\r", "\n"], '\\n', $value);
+            }
+
+            $write[$prefix.'_'.$key] = $value;
+        }
+
+        return $write === [] ? true : $this->setMultiple($write);
     }
+
+    /**
+     * Every setting a gateway understands, and its default.
+     *
+     * One list shared by every bank. Adding a setting here makes it available
+     * to all of them at once, which is the point.
+     */
+    public const GATEWAY_KEYS = [
+        'MERCHANT_CODE' => '',
+        'MERCHANT_APP_ID' => '',
+        'FABRIC_APP_ID' => '',
+        'MINI_APP_CODE' => '',
+        'SHORT_CODE' => '',
+        'APP_SECRET' => '',
+        'PUBLIC_KEY' => '',
+        // Path to a .pem file, preferred over the inline value. A PEM block is
+        // multi-line and a .env value is not — see FabricGateway::publicKey().
+        'PUBLIC_KEY_PATH' => '',
+        'STAGE' => 'uat',
+        'TIMEOUT_EXPRESS' => '120m',
+        'SIGN_KEYS' => '',
+        'RSA_PADDING' => 'oaep',
+        'BASE_URL' => '',
+        'TOKEN_PATH' => '',
+        'ORDER_QUERY_PATH' => '',
+    ];
 
     /**
      * Get all AFRO SMS-related env values

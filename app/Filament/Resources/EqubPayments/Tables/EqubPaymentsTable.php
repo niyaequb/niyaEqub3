@@ -51,11 +51,16 @@ class EqubPaymentsTable
                     'paid' => 'Paid',
                     'failed' => 'Failed',
                 ]),
-                SelectFilter::make('payment_method')->options([
-                    'dashen' => 'Dashen',
-                    'offline' => 'Offline',
-                    'manual' => 'Manual',
-                ]),
+                // Built from the enum rather than written out, so a new bank
+                // appears in this filter the moment it is added instead of
+                // being invisible to reconciliation until someone notices.
+                SelectFilter::make('payment_method')->options(
+                    collect(\App\Enums\EqubPaymentMethod::cases())
+                        ->mapWithKeys(fn (\App\Enums\EqubPaymentMethod $m): array => [
+                            $m->value => $m->label(),
+                        ])
+                        ->all()
+                ),
             ])
             ->recordActions([
                 EditAction::make()
