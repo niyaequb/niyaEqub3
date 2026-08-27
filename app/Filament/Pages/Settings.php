@@ -79,7 +79,7 @@ class Settings extends Page implements HasForms
 
     public function mount(): void
     {
-        $chapaConfig = $this->getEnvService()->getChapaConfig();
+        $dashenConfig = $this->getEnvService()->getDashenConfig();
         $afroConfig = $this->getEnvService()->getAfroConfig();
         $geezConfig = $this->getEnvService()->getGeezConfig();
         $equbConfig = $this->getEnvService()->getEqubConfig();
@@ -100,10 +100,18 @@ class Settings extends Page implements HasForms
         }
 
         $this->form->fill([
-            // Payment
-            'chapa_secret_key' => $chapaConfig['CHAPA_SECRET_KEY'] ?? '',
-            'chapa_public_key' => $chapaConfig['CHAPA_PUBLIC_KEY'] ?? '',
-            'chapa_webhook_secret' => $chapaConfig['CHAPA_WEBHOOK_SECRET'] ?? '',
+            // Payment - Dashen Bank SuperApp
+            'dashen_merchant_code' => $dashenConfig['DASHEN_MERCHANT_CODE'] ?? '',
+            'dashen_merchant_app_id' => $dashenConfig['DASHEN_MERCHANT_APP_ID'] ?? '',
+            'dashen_fabric_app_id' => $dashenConfig['DASHEN_FABRIC_APP_ID'] ?? '',
+            'dashen_mini_app_code' => $dashenConfig['DASHEN_MINI_APP_CODE'] ?? '',
+            'dashen_short_code' => $dashenConfig['DASHEN_SHORT_CODE'] ?? '',
+            'dashen_app_secret' => $dashenConfig['DASHEN_APP_SECRET'] ?? '',
+            'dashen_public_key' => $dashenConfig['DASHEN_PUBLIC_KEY'] ?? '',
+            'dashen_stage' => $dashenConfig['DASHEN_STAGE'] ?? 'uat',
+            'dashen_base_url' => $dashenConfig['DASHEN_BASE_URL'] ?? '',
+            'dashen_token_path' => $dashenConfig['DASHEN_TOKEN_PATH'] ?? '',
+            'dashen_order_query_path' => $dashenConfig['DASHEN_ORDER_QUERY_PATH'] ?? '',
             // AFRO SMS
             'afro_api_key' => $afroConfig['AFRO_API_KEY'] ?? '',
             'afro_identifier_id' => $afroConfig['AFRO_IDENTIFIER_ID'] ?? '',
@@ -292,29 +300,75 @@ class Settings extends Page implements HasForms
     {
         $schema = [];
 
-        // Payment Tab - Chapa Configuration
+        // Payment Tab - Dashen Bank SuperApp
         if ($this->activeTab === 'payment') {
-            $schema[] = ComponentsSection::make(__('filament.settings.chapa_configuration'))
-                ->description(__('filament.settings.chapa_configuration_description'))
+            $schema[] = ComponentsSection::make('Dashen Bank SuperApp')
+                ->description('Mini app credentials issued by Dashen Bank at onboarding. Everything here is signing material — changing a value invalidates every order signed with the old one, so payments will start failing immediately rather than gradually.')
                 ->schema([
-                    TextInput::make('chapa_secret_key')
-                        ->label(__('filament.settings.chapa_secret_key'))
+                    TextInput::make('dashen_merchant_code')
+                        ->label('Merchant Code')
+                        ->helperText('Sent as biz_content.merch_code and payee_identifier.')
+                        ->required()
+                        ->maxLength(64),
+                    TextInput::make('dashen_mini_app_code')
+                        ->label('Mini App Code')
+                        ->helperText('The appid on every order, and the appcode the mini app presents when signing in.')
+                        ->required()
+                        ->maxLength(64),
+                    TextInput::make('dashen_merchant_app_id')
+                        ->label('Merchant App ID')
+                        ->maxLength(64),
+                    TextInput::make('dashen_fabric_app_id')
+                        ->label('Fabric App ID')
+                        ->maxLength(64),
+                    TextInput::make('dashen_short_code')
+                        ->label('Short Code')
+                        ->maxLength(64),
+                    Select::make('dashen_stage')
+                        ->label('Stage')
+                        ->options(['uat' => 'UAT', 'production' => 'Production'])
+                        ->default('uat')
+                        ->required()
+                        ->helperText('Signed into every request, so it must match the stage the mini app is running against. A mismatch is rejected by Dashen, not ignored.'),
+                    TextInput::make('dashen_app_secret')
+                        ->label('App Secret')
                         ->password()
                         ->revealable()
                         ->required()
                         ->dehydrated()
-                        ->helperText(__('filament.settings.chapa_secret_key_helper'))
+                        ->helperText('Signs confirmpayload and is presented to the SuperApp as xAPiKey.')
                         ->maxLength(255),
-                    TextInput::make('chapa_public_key')
-                        ->label(__('filament.settings.chapa_public_key'))
-                        ->helperText(__('filament.settings.chapa_public_key_helper'))
+                    Textarea::make('dashen_public_key')
+                        ->label('RSA Public Key')
+                        ->rows(8)
+                        ->required()
+                        ->helperText('Paste the whole PEM block, BEGIN and END lines included. Used to encrypt the signed portion of each order.')
+                        ->columnSpanFull(),
+                ])
+                ->columns(2);
+
+            // These three are separated deliberately. Everything above came on
+            // the credential sheet; nothing below did. Until Dashen supplies
+            // them, settlement cannot be verified and contributions stay
+            // pending rather than being credited on an unverifiable claim.
+            $schema[] = ComponentsSection::make('Dashen server endpoints')
+                ->description('Not supplied in the Dashen integration pack. While these are empty, settlement verification fails closed: notifications are logged, contributions stay pending, and nobody is credited for money that has not been confirmed.')
+                ->schema([
+                    TextInput::make('dashen_base_url')
+                        ->label('API Base URL')
+                        ->url()
+                        ->placeholder('https://...')
+                        ->helperText('Root of the Dashen SuperApp merchant API.')
                         ->maxLength(255),
-                    TextInput::make('chapa_webhook_secret')
-                        ->label(__('filament.settings.chapa_webhook_secret'))
-                        ->password()
-                        ->revealable()
-                        ->dehydrated()
-                        ->helperText(__('filament.settings.chapa_webhook_secret_helper'))
+                    TextInput::make('dashen_token_path')
+                        ->label('Fabric Token Path')
+                        ->placeholder('e.g. /payment/v1/token')
+                        ->helperText('Exchanges a customeridentifier for a fabric token. Enables Login with DBSA.')
+                        ->maxLength(255),
+                    TextInput::make('dashen_order_query_path')
+                        ->label('Order Query Path')
+                        ->placeholder('e.g. /payment/v1/query')
+                        ->helperText('Confirms whether a transaction settled. Required before any contribution can be marked paid.')
                         ->maxLength(255),
                 ])
                 ->columns(1);
@@ -492,6 +546,67 @@ class Settings extends Page implements HasForms
                 ]);
         }
 
+        // App Version Tab
+        //
+        // Stored in global_settings rather than .env so a release can be
+        // announced without a deploy — the whole point is to reach people who
+        // are already on an old build.
+        if ($this->activeTab === 'app') {
+            $schema[] = ComponentsSection::make(__('filament.settings.app_version_android'))
+                ->description(__('filament.settings.app_version_android_description'))
+                ->schema([
+                    TextInput::make('android_latest_version')
+                        ->label(__('filament.settings.latest_version'))
+                        ->placeholder('1.0.2')
+                        ->helperText(__('filament.settings.latest_version_helper'))
+                        ->maxLength(32),
+                    TextInput::make('android_min_version')
+                        ->label(__('filament.settings.min_version'))
+                        ->placeholder('1.0.0')
+                        ->helperText(__('filament.settings.min_version_helper'))
+                        ->maxLength(32),
+                    TextInput::make('android_store_url')
+                        ->label(__('filament.settings.play_store_url'))
+                        ->url()
+                        ->placeholder('https://play.google.com/store/apps/details?id=...')
+                        ->columnSpanFull()
+                        ->maxLength(255),
+                ])
+                ->columns(2);
+
+            $schema[] = ComponentsSection::make(__('filament.settings.app_version_ios'))
+                ->description(__('filament.settings.app_version_ios_description'))
+                ->schema([
+                    TextInput::make('ios_latest_version')
+                        ->label(__('filament.settings.latest_version'))
+                        ->placeholder('1.0.2')
+                        ->maxLength(32),
+                    TextInput::make('ios_min_version')
+                        ->label(__('filament.settings.min_version'))
+                        ->placeholder('1.0.0')
+                        ->maxLength(32),
+                    TextInput::make('ios_store_url')
+                        ->label(__('filament.settings.app_store_url'))
+                        ->url()
+                        ->placeholder('https://apps.apple.com/app/id...')
+                        ->columnSpanFull()
+                        ->maxLength(255),
+                ])
+                ->columns(2);
+
+            $schema[] = ComponentsSection::make(__('filament.settings.release_notes'))
+                ->description(__('filament.settings.release_notes_description'))
+                ->schema([
+                    Textarea::make('update_release_notes')
+                        ->label(__('filament.settings.release_notes'))
+                        ->rows(6)
+                        ->placeholder("Faster payments\nFixed the Equb calendar\nAmharic corrections")
+                        ->helperText(__('filament.settings.release_notes_helper'))
+                        ->columnSpanFull()
+                        ->maxLength(1000),
+                ]);
+        }
+
         // Support Tab
         if ($this->activeTab === 'support') {
             $schema[] = ComponentsSection::make('Support Contacts')
@@ -604,21 +719,39 @@ class Settings extends Page implements HasForms
             $data = $this->form->getState();
 
             if ($this->activeTab === 'payment') {
-            Log::info('Saving Chapa configuration', ['data' => $data]);
+            // Deliberately no $data in this log line. Everything on this tab is
+            // signing material, and an app secret or private-looking key in the
+            // application log is a credential leak that outlives the request.
+            Log::info('Saving Dashen configuration');
 
-            if (empty($data['chapa_secret_key'])) {
-                Notification::make()
-                    ->title(__('filament.settings.validation_error'))
-                    ->body(__('filament.settings.chapa_secret_key_required'))
-                    ->danger()
-                    ->send();
-                return;
+            foreach ([
+                'dashen_merchant_code' => 'Merchant Code',
+                'dashen_mini_app_code' => 'Mini App Code',
+                'dashen_app_secret' => 'App Secret',
+                'dashen_public_key' => 'RSA Public Key',
+            ] as $field => $label) {
+                if (empty($data[$field])) {
+                    Notification::make()
+                        ->title(__('filament.settings.validation_error'))
+                        ->body($label.' is required. Payments cannot be signed without it.')
+                        ->danger()
+                        ->send();
+                    return;
+                }
             }
 
-            $this->getEnvService()->setChapaConfig([
-                'secret_key' => $data['chapa_secret_key'] ?? '',
-                'public_key' => $data['chapa_public_key'] ?? '',
-                'webhook_secret' => $data['chapa_webhook_secret'] ?? '',
+            $this->getEnvService()->setDashenConfig([
+                'merchant_code' => $data['dashen_merchant_code'] ?? '',
+                'merchant_app_id' => $data['dashen_merchant_app_id'] ?? '',
+                'fabric_app_id' => $data['dashen_fabric_app_id'] ?? '',
+                'mini_app_code' => $data['dashen_mini_app_code'] ?? '',
+                'short_code' => $data['dashen_short_code'] ?? '',
+                'app_secret' => $data['dashen_app_secret'] ?? '',
+                'public_key' => $data['dashen_public_key'] ?? '',
+                'stage' => $data['dashen_stage'] ?? 'uat',
+                'base_url' => $data['dashen_base_url'] ?? '',
+                'token_path' => $data['dashen_token_path'] ?? '',
+                'order_query_path' => $data['dashen_order_query_path'] ?? '',
             ]);
             } elseif ($this->activeTab === 'sms') {
                 if ($this->smsTab === 'afro') {
@@ -655,7 +788,7 @@ class Settings extends Page implements HasForms
                     'enforce_draw_schedule' => $data['equb_enforce_draw_schedule'] ? 'true' : 'false',
                     'members_per_draw' => $data['equb_members_per_draw'] ?? '50',
                 ]);
-            } elseif (in_array($this->activeTab, ['legal', 'support', 'social'])) {
+            } elseif (in_array($this->activeTab, ['legal', 'support', 'social', 'app'])) {
                 Log::info("Saving {$this->activeTab} configuration", ['data' => $data]);
 
                 foreach ($data as $key => $value) {

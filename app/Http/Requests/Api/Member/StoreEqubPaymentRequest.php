@@ -20,7 +20,7 @@ class StoreEqubPaymentRequest extends FormRequest
             'equb_membership_id' => ['required', 'exists:equb_memberships,id'],
             'amount' => ['required', 'numeric', 'min:0'],
             'payment_date' => ['required', 'date'],
-            'payment_method' => ['required', 'in:chapa,offline,manual'],
+            'payment_method' => ['required', 'in:dashen,offline,manual'],
         ];
     }
 }

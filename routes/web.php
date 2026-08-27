@@ -43,9 +43,20 @@ Route::get('/admin/locale/{locale}', function ($locale) {
     return redirect()->route('filament.admin.pages.dashboard');
 })->name('filament.admin.locale.switch')->middleware('auth');
 
-Route::post('/payment/chapa/webhook', [MemberEqubPaymentController::class, 'webhook'])
+/*
+|--------------------------------------------------------------------------
+| Dashen settlement notification
+|--------------------------------------------------------------------------
+|
+| Posted by Dashen when a charge concludes. It sits outside the /api prefix,
+| is exempt from CSRF verification, and must be reachable from the public
+| internet. There is no bearer token on it — integrity comes from the
+| HMAC-SHA256 signature over the raw body, checked in DashenService.
+|
+*/
+Route::post('/payment/dashen/notification', [MemberEqubPaymentController::class, 'notification'])
     ->withoutMiddleware([VerifyCsrfToken::class])
-    ->name('payment.chapa.webhook');
+    ->name('payment.dashen.notification');
 
 /*
 |--------------------------------------------------------------------------

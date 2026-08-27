@@ -19,10 +19,11 @@ use Illuminate\Support\Str;
 /**
  * Contribution collection for members.
  *
- * Every contribution is collected through the Chapa gateway. A record is created in the
- * `pending` state with a hosted checkout URL and becomes `paid` only once the gateway
- * callback has been received and independently verified. Neither the 201 response nor the
- * payer's return from checkout is proof of settlement.
+ * Every contribution is collected through the Dashen Bank SuperApp. A record is created in
+ * the `pending` state together with a signed order payload, and becomes `paid` only once
+ * Dashen's settlement notification has been received and independently verified. Neither
+ * the 201 response nor the SuperApp's own callback into the mini-app is proof of
+ * settlement — the mini-app must poll this controller's `show` endpoint.
  *
  * Scope follows the money: a member sees and pays their own contributions and every
  * contribution on a place they sponsor for someone without an account.
@@ -98,31 +99,50 @@ class EqubPaymentController extends Controller
     }
 
 
-    public function webhook(Request $request): JsonResponse
+    /**
+     * Dashen's settlement notification.
+     *
+     * Signature-verified, no bearer token. Resolution is delegated wholesale to
+     * DashenService rather than being half-done here: the old implementation
+     * looked the payment up by `reference` before handing over, which meant a
+     * batch notification — whose reference is a `batch_reference` — was
+     * rejected with a 404 before the handler that knows how to resolve it ever
+     * ran. One place decides what a reference means.
+     *
+     * The RAW body is passed through for the HMAC. Re-encoding `$request->all()`
+     * would change key order and whitespace and break a valid signature.
+     */
+    public function notification(Request $request): JsonResponse
     {
         $payload = $request->all();
 
-        Log::info('Received Chapa webhook: '. json_encode($payload));
-
-        if (! isset($payload['tx_ref'])) {
-            return response()->json(['status' => 'error', 'message' => 'Reference not provided.'], 400);
-        }
-
-        $payment = EqubPayment::where('reference', $payload['tx_ref'])->first();
-
-        if (! $payment) {
-            return response()->json(['status' => 'error', 'message' => 'Payment not found.'], 404);
-        }
+        Log::info('Received Dashen notification: '.json_encode($payload));
 
         try {
-            app(\App\Services\ChapaService::class)->handleWebhookForEqubPayment($payload);
-            return response()->json(['status' => 'success', 'message' => 'Webhook processed.']);
+            $result = app(\App\Services\DashenService::class)->handleNotificationForEqubPayment(
+                $payload,
+                $request->header('x-dashen-signature') ?? $request->header('x-api-signature'),
+                $request->getContent(),
+            );
+
+            // 200 even when the charge itself failed: the notification was
+            // handled correctly, and a non-200 tells Dashen to retry a delivery
+            // that has nothing left to do. Settlement is never inferred from
+            // this status code.
+            return response()->json([
+                'status' => $result['success'] ? 'success' : 'error',
+                'message' => $result['message'] ?? 'Notification processed.',
+            ]);
         } catch (\Throwable $e) {
+            // A 500 here is a real processing failure and Dashen should retry.
+            Log::error('Dashen notification processing failed: '.$e->getMessage());
+
             return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
         }
     }
+
     /**
-     * Create a payment (offline) or initiate Chapa (online).
+     * Record a contribution and, for the gateway method, sign a Dashen order.
      */
     public function store(StoreEqubPaymentRequest $request): JsonResponse
     {
@@ -149,30 +169,68 @@ class EqubPaymentController extends Controller
         $amount = (float) $request->input('amount');
         $paymentDate = $request->input('payment_date');
 
-        if ($method === EqubPaymentMethod::Chapa->value) {
+        if ($method === EqubPaymentMethod::Dashen->value) {
+            // The charge is signed server-side, so the signed amount had better
+            // be the amount that is actually owed. The client still sends one —
+            // it is what the member saw on the confirmation screen — but a
+            // disagreement is refused rather than quietly resolved either way.
+            // Silently overriding would charge a different figure from the one
+            // on screen; silently accepting would let the client set the price.
+            $due = round((float) $membership->contribution_amount, 2);
+
+            if ($due <= 0) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'This contribution has no amount set.',
+                ], 422);
+            }
+
+            if (round($amount, 2) !== $due) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'That is not the amount due on this contribution.',
+                ], 422);
+            }
+
             $payment = EqubPayment::create([
                 'equb_membership_id' => $membership->id,
-                'amount' => $amount,
+                'amount' => $due,
                 'payment_date' => $paymentDate,
-                'payment_method' => EqubPaymentMethod::Chapa,
+                'payment_method' => EqubPaymentMethod::Dashen,
                 'status' => EqubPaymentStatus::Pending,
             ]);
-            try {
-                $result = app(\App\Services\ChapaService::class)->initializeEqubPayment($payment, 'frontend');
-                if (! $result['success']) {
-                    return response()->json(['status' => 'error', 'message' => $result['message'] ?? 'Failed to initiate payment.'], 422);
-                }
 
-                return response()->json([
-                    'status' => 'success',
-                    'message' => 'Payment initiated. Complete payment in the browser.',
-                    'data' => new EqubPaymentResource($payment->load(['membership.equbGroup.package'])),
-                    'checkout_url' => $result['checkout_url'],
-                    'reference' => $result['reference'],
-                ], 201);
+            try {
+                $result = app(\App\Services\DashenService::class)->createEqubOrder($payment);
             } catch (\Throwable $e) {
+                // Nothing was charged, so the pending row must not be left
+                // behind looking like money the member still owes. Same rule
+                // the batch path has always followed.
+                $payment->delete();
+
                 return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
             }
+
+            if (! ($result['success'] ?? false)) {
+                $payment->delete();
+
+                return response()->json([
+                    'status' => 'error',
+                    'message' => $result['message'] ?? 'Failed to initiate payment.',
+                ], 422);
+            }
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Payment initiated. Confirm it in the Dashen SuperApp.',
+                'data' => new EqubPaymentResource($payment->load(['membership.equbGroup.package'])),
+                // Handed straight to window.dashenbanksuperapp.send as the
+                // `orderPayload` of an initiatePayment call. Opaque to the
+                // client: it is signed, and altering any field invalidates it.
+                'order_payload' => $result['order_payload'],
+                'auth_payload' => $result['auth_payload'],
+                'reference' => $result['reference'],
+            ], 201);
         }
 
         $payment = EqubPayment::create([
@@ -202,8 +260,9 @@ class EqubPaymentController extends Controller
      * — but the member should go through checkout once, for the total.
      *
      * The rows are created up front and tied together by batch_reference; the
-     * gateway sees a single charge against that reference, and the webhook
-     * marks every row carrying it as paid together.
+     * SuperApp sees a single charge against that reference as its
+     * merch_order_id, and the settlement notification marks every row carrying
+     * it as paid together.
      */
     public function storeBatch(Request $request): JsonResponse
     {
@@ -251,8 +310,8 @@ class EqubPaymentController extends Controller
             ], 422);
         }
 
-        $method = $data['payment_method'] ?? EqubPaymentMethod::Chapa->value;
-        $isOnline = $method === EqubPaymentMethod::Chapa->value;
+        $method = $data['payment_method'] ?? EqubPaymentMethod::Dashen->value;
+        $isOnline = $method === EqubPaymentMethod::Dashen->value;
         $batchReference = 'EQUB-B'.strtoupper(Str::random(10));
 
         try {
@@ -262,7 +321,7 @@ class EqubPaymentController extends Controller
                     'amount' => (float) $m->contribution_amount,
                     'payment_date' => $data['payment_date'],
                     'payment_method' => $isOnline
-                        ? EqubPaymentMethod::Chapa
+                        ? EqubPaymentMethod::Dashen
                         : ($method === EqubPaymentMethod::Offline->value
                             ? EqubPaymentMethod::Offline
                             : EqubPaymentMethod::Manual),
@@ -296,8 +355,8 @@ class EqubPaymentController extends Controller
         }
 
         try {
-            $result = app(\App\Services\ChapaService::class)
-                ->initializeEqubBatchPayment($payments->all(), $batchReference, $total, $member);
+            $result = app(\App\Services\DashenService::class)
+                ->createEqubBatchOrder($payments->all(), $batchReference, $total);
         } catch (\Throwable $e) {
             $this->discardBatch($payments);
 
@@ -317,10 +376,14 @@ class EqubPaymentController extends Controller
 
         return response()->json([
             'status' => 'success',
-            'message' => 'Payment initiated. Complete payment in the browser.',
+            'message' => 'Payment initiated. Confirm it in the Dashen SuperApp.',
             'data' => EqubPaymentResource::collection($payments),
-            'checkout_url' => $result['checkout_url'],
+            'order_payload' => $result['order_payload'],
+            'auth_payload' => $result['auth_payload'],
             'reference' => $batchReference,
+            // The authoritative sum to debit. Signed into the order, so the
+            // client cannot re-add the individual amounts and arrive somewhere
+            // else.
             'total_amount' => $total,
             'contributions' => $payments->count(),
         ], 201);

@@ -59,12 +59,28 @@ Route::prefix('auth')->group(function () {
 });
 
 Route::get('settings', [\App\Http\Controllers\Api\SettingsController::class, 'index']);
+// Public on purpose: the app asks on launch, before anyone signs in. Someone
+// stuck on a build where login itself broke is exactly who needs to be told
+// to update.
+Route::get('app-version', [\App\Http\Controllers\Api\AppVersionController::class, 'check']);
 Route::get('faqs', [\App\Http\Controllers\Api\FaqController::class, 'index']);
 Route::get('exchange-rates', [\App\Http\Controllers\Api\ExchangeRateController::class, 'index']);
 Route::get('promotions', [\App\Http\Controllers\Api\PromoController::class, 'index']);
 
-// Route::post('/payment/chapa/webhook', [MemberEqubPaymentController::class, 'webhook'])
-//     ->name('payment.chapa.webhook');
+/*
+|--------------------------------------------------------------------------
+| Dashen SuperApp mini-app
+|--------------------------------------------------------------------------
+|
+| "Login with DBSA". Public by necessity: it is what the member presents
+| INSTEAD of a session, so requiring one would be circular. The customer
+| identifier it accepts is verified with Dashen before anything is issued.
+|
+| The settlement notification is registered in routes/web.php rather than
+| here — Dashen posts it outside the /api prefix.
+|
+*/
+Route::post('miniapp/get-identifier', [\App\Http\Controllers\Api\MiniAppController::class, 'getIdentifier']);
 
 
 // Protected routes (require Sanctum authentication)
@@ -98,7 +114,7 @@ Route::middleware(['jwt.auth', 'active.user'])->group(function () {
         Route::post('equb-groups/{equbGroup}/run-draw', [EqubGroupController::class, 'runDraw']);
         Route::apiResource('equb-memberships', EqubMembershipController::class);
         Route::apiResource('equb-payments', EqubPaymentController::class);
-        Route::post('equb-payments/{equbPayment}/initiate-chapa', [EqubPaymentController::class, 'initiateChapa']);
+        Route::post('equb-payments/{equbPayment}/initiate-dashen', [EqubPaymentController::class, 'initiateDashen']);
         Route::get('equb-draws', [EqubDrawController::class, 'index']);
         Route::get('equb-draws/{equbDraw}', [EqubDrawController::class, 'show']);
 

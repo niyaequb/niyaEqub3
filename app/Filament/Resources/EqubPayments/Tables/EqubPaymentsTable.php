@@ -52,7 +52,7 @@ class EqubPaymentsTable
                     'failed' => 'Failed',
                 ]),
                 SelectFilter::make('payment_method')->options([
-                    'chapa' => 'Chapa',
+                    'dashen' => 'Dashen',
                     'offline' => 'Offline',
                     'manual' => 'Manual',
                 ]),

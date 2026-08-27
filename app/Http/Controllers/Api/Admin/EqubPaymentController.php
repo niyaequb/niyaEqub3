@@ -17,8 +17,8 @@ use Illuminate\Http\Request;
  *
  * Unlike the member endpoints, these are not scoped to a single payer and reach every
  * contribution on the platform. `PUT` with a status transition from `pending` to `paid` is
- * the only settlement route other than the gateway callback, and exists solely for charges
- * the gateway took but never reported — always confirm against the gateway first.
+ * the only settlement route other than Dashen's settlement notification, and exists solely
+ * for charges Dashen took but never reported — always confirm against Dashen first.
  *
  * @group Admin · Contributions
  * @authenticated
@@ -91,18 +91,27 @@ class EqubPaymentController extends Controller
     }
 
     /**
-     * Initiate Chapa payment for an Equb payment (online).
+     * Re-sign a Dashen order for a contribution the payer abandoned.
+     *
+     * Returns a fresh signed order payload for an existing pending row. Note
+     * what this can and cannot do: it produces something the MINI-APP can
+     * present, because authorisation happens inside the SuperApp on the
+     * member's own device. An operator calling this from the admin panel
+     * cannot complete the payment themselves — the payload has to reach the
+     * member's SuperApp session. Under Chapa this returned a URL an admin
+     * could open anywhere, and that difference is inherent to moving inside
+     * the bank's app, not something the endpoint can paper over.
      */
-    public function initiateChapa(EqubPayment $equbPayment): JsonResponse
+    public function initiateDashen(EqubPayment $equbPayment): JsonResponse
     {
-        if ($equbPayment->payment_method->value !== 'chapa') {
-            return response()->json(['status' => 'error', 'message' => 'Payment is not a Chapa payment.'], 422);
+        if ($equbPayment->payment_method->value !== 'dashen') {
+            return response()->json(['status' => 'error', 'message' => 'Payment is not a Dashen payment.'], 422);
         }
         if ($equbPayment->isPaid()) {
             return response()->json(['status' => 'error', 'message' => 'Payment already completed.'], 422);
         }
         try {
-            $result = app(\App\Services\ChapaService::class)->initializeEqubPayment($equbPayment, 'admin');
+            $result = app(\App\Services\DashenService::class)->createEqubOrder($equbPayment);
             if (! $result['success']) {
                 return response()->json(['status' => 'error', 'message' => $result['message'] ?? 'Failed to initialize payment.'], 422);
             }
@@ -110,7 +119,7 @@ class EqubPaymentController extends Controller
             return response()->json([
                 'status' => 'success',
                 'message' => 'Payment initiated.',
-                'checkout_url' => $result['checkout_url'],
+                'order_payload' => $result['order_payload'],
                 'reference' => $result['reference'],
             ]);
         } catch (\Throwable $e) {

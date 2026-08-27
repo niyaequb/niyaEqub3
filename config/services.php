@@ -35,6 +35,35 @@ return [
         ],
     ],
 
+    /*
+    | Dashen Bank SuperApp mini app.
+    |
+    | Read through EnvService rather than from here in DashenService, because
+    | the admin Settings page writes these values to .env at runtime and a
+    | cached config would go on serving the old ones. This block exists so the
+    | shape is documented in one place and so `config('services.dashen.stage')`
+    | works for anything that only needs to read.
+    */
+    'dashen' => [
+        'merchant_code' => env('DASHEN_MERCHANT_CODE'),
+        'merchant_app_id' => env('DASHEN_MERCHANT_APP_ID'),
+        'fabric_app_id' => env('DASHEN_FABRIC_APP_ID'),
+        'mini_app_code' => env('DASHEN_MINI_APP_CODE'),
+        'short_code' => env('DASHEN_SHORT_CODE'),
+        'app_secret' => env('DASHEN_APP_SECRET'),
+        'public_key' => env('DASHEN_PUBLIC_KEY'),
+        'stage' => env('DASHEN_STAGE', 'uat'),
+        'timeout_express' => env('DASHEN_TIMEOUT_EXPRESS', '120m'),
+        'sign_keys' => env('DASHEN_SIGN_KEYS'),
+        'rsa_padding' => env('DASHEN_RSA_PADDING', 'oaep'),
+
+        // Not supplied by Dashen yet. Empty means settlement verification
+        // fails closed — see DashenService::verifyPayment().
+        'base_url' => env('DASHEN_BASE_URL'),
+        'token_path' => env('DASHEN_TOKEN_PATH'),
+        'order_query_path' => env('DASHEN_ORDER_QUERY_PATH'),
+    ],
+
     'equb' => [
         'draw_delay' => env('EQUB_DRAW_DELAY', 30),
         'auto_draw_enabled' => filter_var(env('EQUB_AUTO_DRAW_ENABLED', false), FILTER_VALIDATE_BOOLEAN),

@@ -13,9 +13,9 @@ return new class extends Migration
             $table->foreignId('equb_membership_id')->constrained('equb_memberships')->cascadeOnDelete();
             $table->decimal('amount', 12, 2);
             $table->timestamp('payment_date');
-            $table->string('payment_method'); // chapa, offline, manual
+            $table->string('payment_method'); // dashen, offline, manual
             $table->string('status')->default('pending'); // pending, paid, failed
-            $table->string('reference')->nullable()->unique(); // Chapa tx_ref
+            $table->string('reference')->nullable()->unique(); // Dashen merch_order_id
             $table->timestamps();
         });
     }

@@ -75,26 +75,56 @@ class EnvService
     }
 
     /**
-     * Get all Chapa-related env values
+     * Get all Dashen SuperApp env values.
+     *
+     * DASHEN_BASE_URL, DASHEN_TOKEN_PATH and DASHEN_ORDER_QUERY_PATH are the
+     * three Dashen has not yet supplied. They default empty, which makes
+     * DashenService fail closed rather than guess — see the comment on
+     * verifyPayment().
      */
-    public function getChapaConfig(): array
+    public function getDashenConfig(): array
     {
         return [
-            'CHAPA_SECRET_KEY' => $this->get('CHAPA_SECRET_KEY', ''),
-            'CHAPA_PUBLIC_KEY' => $this->get('CHAPA_PUBLIC_KEY', ''),
-            'CHAPA_WEBHOOK_SECRET' => $this->get('CHAPA_WEBHOOK_SECRET', ''),
+            'DASHEN_MERCHANT_CODE' => $this->get('DASHEN_MERCHANT_CODE', ''),
+            'DASHEN_MERCHANT_APP_ID' => $this->get('DASHEN_MERCHANT_APP_ID', ''),
+            'DASHEN_FABRIC_APP_ID' => $this->get('DASHEN_FABRIC_APP_ID', ''),
+            'DASHEN_MINI_APP_CODE' => $this->get('DASHEN_MINI_APP_CODE', ''),
+            'DASHEN_SHORT_CODE' => $this->get('DASHEN_SHORT_CODE', ''),
+            'DASHEN_APP_SECRET' => $this->get('DASHEN_APP_SECRET', ''),
+            // Returned with real line breaks. The literal \n form is purely an
+            // .env storage detail — a single line cannot hold a PEM block — and
+            // nothing that reads this config should have to know about it.
+            'DASHEN_PUBLIC_KEY' => str_replace('\n', "\n", (string) $this->get('DASHEN_PUBLIC_KEY', '')),
+            'DASHEN_STAGE' => $this->get('DASHEN_STAGE', 'uat'),
+            'DASHEN_BASE_URL' => $this->get('DASHEN_BASE_URL', ''),
+            'DASHEN_TOKEN_PATH' => $this->get('DASHEN_TOKEN_PATH', ''),
+            'DASHEN_ORDER_QUERY_PATH' => $this->get('DASHEN_ORDER_QUERY_PATH', ''),
         ];
     }
 
     /**
-     * Set Chapa configuration
+     * Set Dashen SuperApp configuration.
+     *
+     * The public key is stored with real newlines collapsed to literal \n, the
+     * only form a single .env line can carry. DashenService puts them back.
      */
-    public function setChapaConfig(array $config): bool
+    public function setDashenConfig(array $config): bool
     {
+        $publicKey = (string) ($config['public_key'] ?? '');
+        $publicKey = str_replace(["\r\n", "\r", "\n"], '\\n', $publicKey);
+
         return $this->setMultiple([
-            'CHAPA_SECRET_KEY' => $config['secret_key'] ?? '',
-            'CHAPA_PUBLIC_KEY' => $config['public_key'] ?? '',
-            'CHAPA_WEBHOOK_SECRET' => $config['webhook_secret'] ?? '',
+            'DASHEN_MERCHANT_CODE' => $config['merchant_code'] ?? '',
+            'DASHEN_MERCHANT_APP_ID' => $config['merchant_app_id'] ?? '',
+            'DASHEN_FABRIC_APP_ID' => $config['fabric_app_id'] ?? '',
+            'DASHEN_MINI_APP_CODE' => $config['mini_app_code'] ?? '',
+            'DASHEN_SHORT_CODE' => $config['short_code'] ?? '',
+            'DASHEN_APP_SECRET' => $config['app_secret'] ?? '',
+            'DASHEN_PUBLIC_KEY' => $publicKey,
+            'DASHEN_STAGE' => $config['stage'] ?? 'uat',
+            'DASHEN_BASE_URL' => $config['base_url'] ?? '',
+            'DASHEN_TOKEN_PATH' => $config['token_path'] ?? '',
+            'DASHEN_ORDER_QUERY_PATH' => $config['order_query_path'] ?? '',
         ]);
     }
 

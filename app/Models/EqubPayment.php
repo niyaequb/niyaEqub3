@@ -36,7 +36,10 @@ class EqubPayment extends Model
     protected static function booted(): void
     {
         static::creating(function (EqubPayment $payment): void {
-            if ($payment->payment_method === EqubPaymentMethod::Chapa && empty($payment->reference)) {
+            // The reference is the merch_order_id Dashen carries, so it has to
+            // exist before the order is signed. Offline and manual rows have no
+            // gateway transaction behind them and stay unreferenced.
+            if ($payment->payment_method === EqubPaymentMethod::Dashen && empty($payment->reference)) {
                 $payment->reference = 'EQUB-'.strtoupper(Str::random(12));
             }
         });

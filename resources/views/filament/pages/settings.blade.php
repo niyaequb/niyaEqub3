@@ -50,6 +50,15 @@
                         <span>Legal</span>
                     </button>
                     <button
+                        wire:click="setActiveTab('app')"
+                        class="@if($activeTab === 'app') border-emerald-500 text-emerald-600 dark:text-emerald-400 @else border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300 @endif whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm flex items-center space-x-2"
+                    >
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16" />
+                        </svg>
+                        <span>{{ __('filament.settings.app_version_tab') }}</span>
+                    </button>
+                    <button
                         wire:click="setActiveTab('support')"
                         class="@if($activeTab === 'support') border-indigo-500 text-indigo-600 dark:text-indigo-400 @else border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300 @endif whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm flex items-center space-x-2"
                     >
@@ -192,7 +201,7 @@
             </form>
         @endif
 
-        @if(in_array($activeTab, ['legal', 'support', 'social']))
+        @if(in_array($activeTab, ['legal', 'support', 'social', 'app']))
             <!-- General DB Settings -->
             <form wire:submit="save">
                 {{ $this->form }}
