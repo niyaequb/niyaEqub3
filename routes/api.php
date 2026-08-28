@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\Agent\AgentDashboardController;
 use App\Http\Controllers\Api\Agent\AgentMembersController;
 use App\Http\Controllers\Api\Agent\AgentPaymentsController;
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\DiagnosticsController;
 use App\Http\Controllers\Api\Member\AgentInfoController;
 use App\Http\Controllers\Api\Member\EqubDrawController as MemberEqubDrawController;
 use App\Http\Controllers\Api\Member\EqubGroupInvitationController;
@@ -44,6 +45,19 @@ use Illuminate\Support\Facades\Route;
 // Without the index, GET /api returns a 404 page and reads as an outage.
 Route::get('/', [ServiceController::class, 'index']);
 Route::get('health', [ServiceController::class, 'health']);
+
+// TEMPORARY — delete this route and DiagnosticsController once sign-in is fixed.
+//
+// Times each step of the login path in isolation, because a 504 on POST
+// /auth/login carries no body, no stack trace and no log line: nothing failed,
+// something was merely slow, and only measurement can say which statement.
+//
+// A GET on purpose, so it can be opened in a browser on a phone.
+//
+// Throttled because the bcrypt step is deliberately expensive work reachable
+// without credentials, which is a denial-of-service lever if left open.
+Route::get('diagnostics/auth', [DiagnosticsController::class, 'auth'])
+    ->middleware('throttle:10,1');
 
 // Public authentication routes
 Route::prefix('auth')->group(function () {
