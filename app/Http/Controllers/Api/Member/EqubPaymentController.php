@@ -308,6 +308,9 @@ class EqubPaymentController extends Controller
             return response()->json(['status' => 'error', 'message' => 'Member profile not found.'], 404);
         }
 
+        $gateways = app(PaymentGatewayManager::class);
+        $accepted = $gateways->acceptedMethods();
+
         $data = $request->validate([
             'equb_membership_ids' => ['required', 'array', 'min:1', 'max:20'],
             'equb_membership_ids.*' => ['integer'],
@@ -316,10 +319,29 @@ class EqubPaymentController extends Controller
             // platform default. Validated against the same live register, so a
             // bank that is not currently payable is refused before any row is
             // created.
-            'payment_method' => [
-                'nullable',
-                \Illuminate\Validation\Rule::in(app(PaymentGatewayManager::class)->acceptedMethods()),
-            ],
+            'payment_method' => ['nullable', \Illuminate\Validation\Rule::in($accepted)],
+        ], [
+            // Laravel's default for this rule is "The selected payment method
+            // is invalid." — which names neither what was sent nor what would
+            // have been accepted, and left this exact failure unexplainable
+            // from the screen it appeared on.
+            //
+            // Two completely different faults produce it, and they need
+            // opposite fixes, so the message has to tell them apart:
+            //
+            //   * the accepted list is EMPTY — no bank is configured on THIS
+            //     server, so every value fails including the correct one. Fix
+            //     the server's credentials.
+            //   * the list is NOT empty — the client sent something outside
+            //     it, which in practice means an app build older than the bank
+            //     it is trying to pay through. Rebuild the client.
+            //
+            // Naming the accepted banks is safe: the same list is already
+            // public at GET /api/payments/providers, because the apps need it
+            // to draw a bank picker.
+            'payment_method.in' => $accepted === []
+                ? 'No bank is available for payments on this server right now — its payment credentials are missing or incomplete.'
+                : 'That payment method is not available. Payments can currently go through: '.implode(', ', $accepted).'.',
         ]);
 
         $ids = array_values(array_unique(array_map('intval', $data['equb_membership_ids'])));
@@ -352,8 +374,6 @@ class EqubPaymentController extends Controller
                 'message' => 'These contributions have no amount set.',
             ], 422);
         }
-
-        $gateways = app(PaymentGatewayManager::class);
 
         // No provider named means the platform's default bank. Every current
         // client names one; this is a compatibility floor, not a routing
