@@ -773,7 +773,13 @@ abstract class FabricGateway implements PaymentGateway
             return [
                 'success' => true,
                 'token' => data_get($data, 'token') ?? data_get($data, 'access_token'),
-                'phone' => data_get($data, 'phone')
+                // Shape confirmed against a live Dashen UAT response on
+                // 15 Sep 2026: the customer is nested at data.customer and the
+                // number is spelled phoneNumber. The older guesses are kept
+                // behind it so the next bank on this scheme does not need a
+                // code change to be tried.
+                'phone' => data_get($data, 'data.customer.phoneNumber')
+                    ?? data_get($data, 'phone')
                     ?? data_get($data, 'mobile')
                     ?? data_get($data, 'customer.phone'),
                 'data' => $data,
