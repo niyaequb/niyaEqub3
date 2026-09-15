@@ -249,6 +249,142 @@ abstract class FabricGateway implements PaymentGateway
         return (string) $this->setting('MERCHANT_CODE');
     }
 
+    /**
+     * The merchant's id in the bank's own registry.
+     *
+     * NOT the merchant code, and the two are not interchangeable. Dashen issue
+     * both: the CODE (385141159275721) goes in `biz_content.merch_code` and
+     * names the settlement account; the ID (6a8bea061fc8d19411db02ee) is the
+     * key of the mini-app record in their registry and is the only thing
+     * `getfabrictoken` accepts. Neither is derivable from the other, and
+     * sending one where the other belongs fails without explaining itself.
+     */
+    public function merchantId(): string
+    {
+        return (string) $this->setting('MERCHANT_ID');
+    }
+
+    // ---------------------------------------------------------------------
+    // Fabric token
+    // ---------------------------------------------------------------------
+
+    /**
+     * A fresh fabric token for the `x-access-token` header.
+     *
+     * WHY THIS EXISTS
+     *
+     * The super-app signs nothing. It takes the payload this server produced
+     * and POSTs it to the bank's `createorder`, and the two headers on that
+     * request come from authPayload():
+     *
+     *     x-api-key       <- xAPiKey        the app secret
+     *     x-access-token  <- xAccessToken   this
+     *
+     * A missing or expired token is answered `{"message":"Incomplete
+     * request"}`. That message is about the HEADERS, not the body — which is
+     * why an order whose HMAC verifies byte-for-byte at the bank can still be
+     * refused, and why this stayed invisible from our side for so long: the
+     * payload really was correct.
+     *
+     * FETCHED FRESH EVERY TIME, DELIBERATELY
+     *
+     * These tokens are short-lived, and "expired token" is precisely the
+     * failure this method exists to prevent. A cache would trade a few hundred
+     * milliseconds for reintroducing the bug.
+     *
+     * THROWS RATHER THAN RETURNING NULL
+     *
+     * An order with no token is certain to be rejected. Signing one anyway
+     * would leave a pending contribution behind for money that was never going
+     * to move, so this fails before any row is created and EqubOrderService
+     * turns it into a logged error and a plain message for the member.
+     */
+    protected function fabricToken(?string $customerIdentifier = null): string
+    {
+        $base = trim((string) $this->setting('BASE_URL'));
+        $path = trim((string) ($this->setting('FABRIC_TOKEN_PATH') ?: $this->setting('TOKEN_PATH')));
+
+        if ($base === '' || $path === '') {
+            throw new \RuntimeException(
+                $this->displayName().' cannot issue a fabric token: set '
+                .$this->envPrefix().'_BASE_URL and '.$this->envPrefix()
+                .'_FABRIC_TOKEN_PATH. Without them every order is refused with '
+                .'"Incomplete request".'
+            );
+        }
+
+        if (trim($this->merchantId()) === '') {
+            throw new \RuntimeException(
+                $this->displayName().' cannot issue a fabric token: '
+                .$this->envPrefix().'_MERCHANT_ID is not set. That is the '
+                .'registry id, not the merchant code.'
+            );
+        }
+
+        $identifier = trim((string) ($customerIdentifier ?: $this->setting('CUSTOMER_IDENTIFIER')));
+
+        $body = [
+            'stage' => $this->stage(),
+            'appcode' => $this->miniAppCode(),
+            'merchant_id' => $this->merchantId(),
+        ];
+
+        // Omitted rather than sent empty: a blank identifier is a different
+        // request from no identifier, and these banks treat it so.
+        if ($identifier !== '') {
+            $body['customeridentifier'] = $identifier;
+        }
+
+        try {
+            $response = Http::withHeaders([
+                'Content-Type' => 'application/json',
+                'x-api-key' => $this->appSecret(),
+            ])->timeout(20)->post(rtrim($base, '/').'/'.ltrim($path, '/'), $body);
+        } catch (\Throwable $e) {
+            Log::error('Fabric token request failed to complete', [
+                'gateway' => $this->slug(),
+                'error' => $e->getMessage(),
+            ]);
+
+            throw new \RuntimeException(
+                'Could not reach '.$this->displayName().' to authorise this payment.'
+            );
+        }
+
+        $data = $response->json();
+
+        // These banks are not consistent about where the token sits, and a
+        // later revision moving it must not become a silent outage.
+        $token = '';
+        foreach ([
+            'token', 'access_token', 'accessToken',
+            'data.token', 'data.access_token',
+            'biz_content.token', 'biz_content.access_token',
+        ] as $candidate) {
+            $value = trim((string) data_get($data, $candidate));
+
+            if ($value !== '') {
+                $token = $value;
+                break;
+            }
+        }
+
+        if (! $response->successful() || $token === '') {
+            Log::error('Fabric token request returned no usable token', [
+                'gateway' => $this->slug(),
+                'status' => $response->status(),
+                'body' => $data,
+            ]);
+
+            throw new \RuntimeException(
+                $this->displayName().' did not issue a payment token ('
+                .(data_get($data, 'message') ?: 'HTTP '.$response->status()).').'
+            );
+        }
+
+        return $token;
+    }
+
     // ---------------------------------------------------------------------
     // Signing
     // ---------------------------------------------------------------------
@@ -444,12 +580,23 @@ abstract class FabricGateway implements PaymentGateway
      * Until then treat {PREFIX}_APP_SECRET as public, and note that the real
      * protection against a tampered amount is server-side: the controller
      * reads what is owed from the membership and never from the request.
+     *
+     * BOTH VALUES BECOME HEADERS ON A REQUEST WE NEVER SEE.
+     *
+     * The super-app copies xAPiKey to `x-api-key` and xAccessToken to
+     * `x-access-token` and POSTs the order to the bank itself. Until Sep 2026
+     * the second was always null, because this took the customer's session
+     * token as an argument and the only caller passed nothing — so every
+     * order, however perfectly signed, came back "Incomplete request".
+     *
+     * The argument is now the customer identifier, which is what the token is
+     * minted FROM rather than the token itself. See fabricToken().
      */
-    public function authPayload(?string $sessionToken = null): array
+    public function authPayload(?string $customerIdentifier = null): array
     {
         return [
             'xAPiKey' => $this->appSecret(),
-            'xAccessToken' => $sessionToken,
+            'xAccessToken' => $this->fabricToken($customerIdentifier),
         ];
     }
 
@@ -600,10 +747,12 @@ abstract class FabricGateway implements PaymentGateway
                 'Content-Type' => 'application/json',
                 'x-api-key' => $this->appSecret(),
             ])->timeout(30)->post($this->endpoint('TOKEN_PATH'), [
-                'appid' => $this->miniAppCode(),
-                'fabric_app_id' => $this->setting('FABRIC_APP_ID'),
-                'merch_code' => $this->merchantCode(),
+                // Field names per Dashen's integration note of 15 Sep 2026.
+                // The previous shape (appid / fabric_app_id / merch_code) was
+                // read off an older sample and is not what this endpoint takes.
                 'stage' => $this->stage(),
+                'appcode' => $this->miniAppCode(),
+                'merchant_id' => $this->merchantId(),
                 'customeridentifier' => $identifier,
             ]);
 

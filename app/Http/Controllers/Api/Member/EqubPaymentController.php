@@ -243,7 +243,11 @@ class EqubPaymentController extends Controller
                 'status' => EqubPaymentStatus::Pending,
             ]);
 
-            $result = app(EqubOrderService::class)->createFor($payment, $gateway);
+            $result = app(EqubOrderService::class)->createFor(
+                $payment,
+                $gateway,
+                $request->input('customer_identifier'),
+            );
 
             if (! ($result['success'] ?? false)) {
                 // Nothing was charged, so the pending row must not be left
@@ -314,6 +318,10 @@ class EqubPaymentController extends Controller
         $data = $request->validate([
             'equb_membership_ids' => ['required', 'array', 'min:1', 'max:20'],
             'equb_membership_ids.*' => ['integer'],
+            // See StoreEqubPaymentRequest for why this is optional and why it
+            // is constrained: the bank's access token for this order is minted
+            // from it, and nothing is authorised on its strength.
+            'customer_identifier' => ['nullable', 'string', 'max:64', 'regex:/^[A-Za-z0-9._@:-]+$/'],
             'payment_date' => ['required', 'date'],
             // Optional here, unlike the single path: omitting it means the
             // platform default. Validated against the same live register, so a
@@ -432,7 +440,13 @@ class EqubPaymentController extends Controller
         }
 
         $result = app(EqubOrderService::class)
-            ->createForBatch($payments->all(), $batchReference, $total, $gateway);
+            ->createForBatch(
+                $payments->all(),
+                $batchReference,
+                $total,
+                $gateway,
+                $data['customer_identifier'] ?? null,
+            );
 
         if (! ($result['success'] ?? false)) {
             // Nothing was charged, so the pending rows must not be left behind

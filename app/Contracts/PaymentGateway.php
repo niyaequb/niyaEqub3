@@ -80,10 +80,17 @@ interface PaymentGateway
     /**
      * Credentials the client presents alongside the order.
      *
-     * @param  string|null  $sessionToken  The customer's own token, where the
-     *                                     bank issues one at sign-in.
+     * These become HTTP HEADERS on a request the client makes to the bank, not
+     * fields inside the order body. A gateway that returns an incomplete set
+     * therefore produces an order that is refused before its contents are ever
+     * read — and the bank's complaint will be about the request, not about
+     * anything you can see in the payload.
+     *
+     * @param  string|null  $customerIdentifier  Who the host app says is using
+     *                                           it, where the bank mints a
+     *                                           per-customer access token.
      */
-    public function authPayload(?string $sessionToken = null): array;
+    public function authPayload(?string $customerIdentifier = null): array;
 
     /**
      * Ask the bank whether a transaction actually completed.

@@ -35,6 +35,19 @@ class StoreEqubPaymentRequest extends FormRequest
                 'required',
                 Rule::in(app(PaymentGatewayManager::class)->acceptedMethods()),
             ],
+
+            // Who the bank's host app says is using it, when the mini app was
+            // able to ask. The server mints this order's access token from it
+            // and never stores it — so it is a pass-through, not identity.
+            // Nothing is authorised on its strength, and changing it does not
+            // let a member pay for a place that is not theirs, because the
+            // membership is resolved from the authenticated user.
+            //
+            // Optional: it does not exist outside the host app, and
+            // {PREFIX}_CUSTOMER_IDENTIFIER stands in during UAT. Constrained
+            // to the shape these banks issue so a client cannot push arbitrary
+            // content into a request this server then makes to a bank.
+            'customer_identifier' => ['nullable', 'string', 'max:64', 'regex:/^[A-Za-z0-9._@:-]+$/'],
         ];
     }
 

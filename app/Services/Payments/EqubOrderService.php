@@ -26,14 +26,18 @@ class EqubOrderService
      *
      * @return array{success: bool, order_payload?: array, auth_payload?: array, reference?: string, message?: string}
      */
-    public function createFor(EqubPayment $payment, PaymentGateway $gateway): array
-    {
+    public function createFor(
+        EqubPayment $payment,
+        PaymentGateway $gateway,
+        ?string $customerIdentifier = null,
+    ): array {
         return $this->build(
             $gateway,
             $payment->reference,
             (float) $payment->amount,
             $this->narrationFor($payment),
             ['equb_payment_id' => $payment->id],
+            $customerIdentifier,
         );
     }
 
@@ -51,6 +55,7 @@ class EqubOrderService
         string $batchReference,
         float $total,
         PaymentGateway $gateway,
+        ?string $customerIdentifier = null,
     ): array {
         $count = count($payments);
 
@@ -62,6 +67,7 @@ class EqubOrderService
                 ? "Equb contribution for {$count} places"
                 : 'Equb contribution payment',
             ['batch_reference' => $batchReference, 'contributions' => $count],
+            $customerIdentifier,
         );
     }
 
@@ -97,16 +103,24 @@ class EqubOrderService
         float $amount,
         string $narration,
         array $logContext = [],
+        ?string $customerIdentifier = null,
     ): array {
         try {
             return [
                 'success' => true,
                 'provider' => $gateway->slug(),
                 'order_payload' => $gateway->createOrder($reference, $amount, $narration),
-                // The customer's own session token is the client's, held from
-                // sign-in; the server never sees it, so it is left null here
-                // and the app fills it in.
-                'auth_payload' => $gateway->authPayload(),
+                // Built HERE, on the server, because the credentials it takes
+                // are the ones the client is not trusted with.
+                //
+                // What this replaced read: "the customer's own session token is
+                // the client's [...] so it is left null here and the app fills
+                // it in." The app never filled it in — the bridge passes
+                // auth_payload through untouched, by design, because the order
+                // is HMAC'd. So x-access-token went to the bank empty on every
+                // order ever sent, and every one came back "Incomplete
+                // request" while the payload itself was provably correct.
+                'auth_payload' => $gateway->authPayload($customerIdentifier),
                 // Everything the app needs to present this order — which host
                 // app to talk to and how.
                 //
