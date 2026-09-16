@@ -3,6 +3,7 @@
 namespace App\Services\Payments;
 
 use App\Contracts\PaymentGateway;
+use App\Enums\EqubPaymentStatus;
 use App\Models\EqubPayment;
 use App\Services\EqubMembershipService;
 use App\Services\SmsService;
@@ -33,6 +34,23 @@ use Illuminate\Support\Facades\Log;
  */
 class PaymentSettlementService
 {
+    /**
+     * How long an order the bank has never heard of stays pending.
+     *
+     * A member who taps Pay and then closes the app leaves a row behind that
+     * Dashen have no record of — `check-status` answers "Transaction not
+     * found". That is indistinguishable, in the first minutes, from a member
+     * still looking at the PIN screen, so it cannot mean failure immediately.
+     *
+     * It does mean failure eventually. `timeout_express` on the order is 120
+     * minutes, after which nobody can pay it; a day is comfortably past that
+     * and leaves room for a bank-side delay nobody has warned us about. Without
+     * this, abandoned orders would be re-queried every five minutes forever and
+     * the pending queue an operator is meant to watch would fill with rows that
+     * were never going anywhere.
+     */
+    protected const ABANDON_AFTER_HOURS = 24;
+
     /**
      * Settle every contribution behind one bank transaction.
      *
@@ -125,9 +143,15 @@ class PaymentSettlementService
         }
 
         // Nothing left to do, and worth answering before spending a call on
-        // the bank: a sweep runs over the same rows repeatedly until they
-        // leave the pending state.
-        if ($payments->every(fn (EqubPayment $payment) => ! $payment->isPending())) {
+        // the bank: a sweep runs over the same rows repeatedly.
+        //
+        // ALREADY PAID, not merely "no longer pending". A row this service
+        // previously marked FAILED is exactly the one worth asking about
+        // again — a write-off made on a status nobody had confirmed the
+        // meaning of, or on a bank that was unreachable, is a mistake that
+        // should be recoverable rather than permanent. Skipping every
+        // non-pending row would have made it permanent.
+        if ($payments->every(fn (EqubPayment $payment) => $payment->status === EqubPaymentStatus::Paid)) {
             return [
                 'success' => true,
                 'message' => 'Already settled',
@@ -195,6 +219,30 @@ class PaymentSettlementService
         array $verification,
     ): array {
         if (($verification['unconfigured'] ?? false) || ($verification['pending'] ?? false)) {
+            // An order the bank has never heard of, long after anyone could
+            // still pay it, was abandoned rather than left in doubt. Writing it
+            // off here is safe in a way that writing off an unrecognised STATUS
+            // is not: "not found" means no money moved, so there is no member
+            // who has been debited and is about to be told nothing happened.
+            if (($verification['not_found'] ?? false) && $this->isAbandoned($payments)) {
+                foreach ($payments as $payment) {
+                    if ($payment->isPending()) {
+                        $payment->markAsFailed();
+                    }
+                }
+
+                Log::info('Abandoned order marked failed: never completed at the bank', [
+                    'gateway' => $gateway->slug(),
+                    'reference' => $reference,
+                    'payments' => $payments->pluck('id')->all(),
+                ]);
+
+                return [
+                    'success' => false,
+                    'message' => 'This payment was never completed.',
+                ];
+            }
+
             Log::warning('Settlement left pending: cannot verify with the bank', [
                 'gateway' => $gateway->slug(),
                 'reference' => $reference,
@@ -226,6 +274,26 @@ class PaymentSettlementService
     }
 
     /**
+     * Is every contribution here old enough to give up on?
+     *
+     * Every, not any. A batch settles together, so if one row in it is still
+     * young the whole charge is still young — and writing off the older rows
+     * beside it would split a single payment into a half-failed state that
+     * nothing downstream expects.
+     *
+     * @param  \Illuminate\Support\Collection<int, EqubPayment>  $payments
+     */
+    protected function isAbandoned($payments): bool
+    {
+        $cutoff = now()->subHours(static::ABANDON_AFTER_HOURS);
+
+        return $payments->every(
+            fn (EqubPayment $payment): bool => $payment->created_at !== null
+                && $payment->created_at->lt($cutoff)
+        );
+    }
+
+    /**
      * Credit every contribution in the charge.
      *
      * They settle together. Marking only one would leave the member's own place
@@ -241,7 +309,15 @@ class PaymentSettlementService
         $settled = collect();
 
         foreach ($payments as $payment) {
-            if (! $payment->isPending()) {
+            // Skip what is ALREADY PAID, which is what keeps this idempotent:
+            // a replayed notification cannot double-credit a contribution or
+            // send a second receipt.
+            //
+            // A FAILED row is not skipped. If the bank now says the money
+            // moved, the bank is right and our earlier write-off was wrong —
+            // and a member who really paid must end up credited, whatever this
+            // service concluded on an earlier pass with worse information.
+            if ($payment->status === EqubPaymentStatus::Paid) {
                 continue;
             }
 

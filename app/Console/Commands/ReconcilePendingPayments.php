@@ -51,6 +51,7 @@ class ReconcilePendingPayments extends Command
                             {--limit=100 : Most references to check in one run}
                             {--min-age=2 : Skip contributions newer than this many minutes}
                             {--max-age=7 : Ignore contributions older than this many days}
+                            {--include-failed : Also re-ask about contributions previously marked failed}
                             {--sleep=250 : Milliseconds to wait between calls}
                             {--dry-run : List what would be checked and change nothing}';
 
@@ -159,13 +160,29 @@ class ReconcilePendingPayments extends Command
      * succeeding now; it needs a person, not another API call every five
      * minutes forever.
      *
+     * WITH --include-failed, rows already written off are asked about again.
+     *
+     * A failure here was never a fact about money, only a conclusion drawn
+     * from whatever the bank said at the time — and early on that included
+     * statuses nobody had confirmed the meaning of. If a contribution was
+     * marked failed wrongly, a member who really paid is sitting there
+     * uncredited, and no scheduled run would ever look at them again. This is
+     * how that gets undone. Not for the cron; for the morning after a bad
+     * assumption is found.
+     *
      * @return \Illuminate\Support\Collection<int, string>
      */
     protected function pendingReferences(string $slug)
     {
+        $statuses = [EqubPaymentStatus::Pending];
+
+        if ($this->option('include-failed')) {
+            $statuses[] = EqubPaymentStatus::Failed;
+        }
+
         return EqubPayment::query()
             ->where('payment_method', $slug)
-            ->where('status', EqubPaymentStatus::Pending)
+            ->whereIn('status', $statuses)
             ->where('created_at', '<=', now()->subMinutes((int) $this->option('min-age')))
             ->where('created_at', '>=', now()->subDays((int) $this->option('max-age')))
             ->orderByDesc('created_at')

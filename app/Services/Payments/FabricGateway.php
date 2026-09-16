@@ -431,7 +431,16 @@ abstract class FabricGateway implements PaymentGateway
         Log::info('Fabric token issued', [
             'gateway' => $this->slug(),
             'customer' => $subject ?: '(not in claims)',
-            'source' => trim((string) $customerIdentifier) !== '' ? 'client' : 'configured',
+            // Three sources, and telling them apart is the point: 'client' is
+            // a live customer from the host app, 'configured' is the UAT
+            // stand-in that must not survive to production, and 'service' is a
+            // token with no customer at all — which is correct for
+            // verification, where nobody is holding a phone.
+            'source' => match (true) {
+                trim((string) $customerIdentifier) !== '' => 'client',
+                $identifier !== '' => 'configured',
+                default => 'service',
+            },
         ]);
 
         return $token;

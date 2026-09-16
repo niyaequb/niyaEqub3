@@ -189,10 +189,18 @@ class DashenGateway extends FabricGateway
         }
 
         if ($status !== '' && in_array($status, $this->failedStatuses(), true)) {
-            Log::info('Bank reports this payment as failed', [
+            // The WHOLE body, not just the status. This is the one branch that
+            // writes a contribution off, and the first time it fired in UAT it
+            // was impossible to tell why: the summary line said "failed" and
+            // the message said "Pending", and nothing had been kept to
+            // reconcile the two. A log line that cannot explain the decision it
+            // records is not much of a log line.
+            Log::warning('Bank reports this payment as failed', [
                 'gateway' => $this->slug(),
                 'reference' => $reference,
                 'status' => $status,
+                'http' => $response->status(),
+                'body' => $data,
             ]);
 
             return [
@@ -203,22 +211,77 @@ class DashenGateway extends FabricGateway
         }
 
         // The important branch. Unknown status, unexpected HTTP code, an order
-        // the bank has not heard of yet — all of it leaves the contribution
-        // exactly where it is.
+        // the bank has not heard of — all of it leaves the contribution where
+        // it is.
+        //
+        // "Transaction not found" is called out separately because it is by far
+        // the most common answer here and it means something specific: the
+        // member tapped Pay, we created the order, and they never completed it.
+        // Dashen never hear of such an order at all.
+        //
+        // It is still NOT failure on its own. Inside the timeout_express window
+        // the customer may simply still be on the PIN screen, and the same
+        // "not found" would be returned. Only age settles it, and age is a
+        // question about contributions rather than about banking — so this
+        // reports the fact and PaymentSettlementService decides what it means.
+        $notFound = str_contains(
+            strtolower(trim((string) data_get($data, 'message'))),
+            'not found'
+        );
+
         Log::warning('Payment verification was inconclusive; leaving pending', [
             'gateway' => $this->slug(),
             'reference' => $reference,
             'http' => $response->status(),
             'status' => $status !== '' ? $status : '(none returned)',
+            'not_found' => $notFound,
             'body' => $data,
         ]);
 
         return [
             'success' => false,
             'pending' => true,
-            'message' => 'The bank did not confirm this payment either way.',
+            'not_found' => $notFound,
+            'message' => $notFound
+                ? 'The bank has no record of this order yet.'
+                : 'The bank did not confirm this payment either way.',
             'data' => $data,
         ];
+    }
+
+    /**
+     * The only status that means money actually moved.
+     *
+     * NARROWER THAN THE PARENT'S LIST, DELIBERATELY.
+     *
+     * FabricGateway accepts SUCCESS, SUCCEEDED, PAID, COMPLETED and
+     * TRADE_SUCCESS, because those banks are not consistent with one another
+     * and it had to guess. Dashen are consistent: `check-status` answers PAID,
+     * observed against live transactions in UAT.
+     *
+     * Accepting spellings they have never sent buys nothing and risks
+     * something. Guessing wrong in THIS direction credits a member for money
+     * that has not arrived — an Equb paying out against a contribution nobody
+     * made. Guessing wrong in the other direction leaves a contribution pending
+     * until an operator looks at it. Those are not comparable mistakes, so this
+     * list holds exactly what has been observed and nothing that was imagined.
+     *
+     * Widen it with DASHEN_SETTLED_STATUSES if they confirm another value.
+     *
+     * @return array<int, string>
+     */
+    protected function settledStatuses(): array
+    {
+        $configured = trim((string) $this->setting('SETTLED_STATUSES'));
+
+        if ($configured !== '') {
+            return array_values(array_filter(array_map(
+                fn ($value) => strtoupper(trim($value)),
+                explode(',', $configured)
+            )));
+        }
+
+        return ['PAID'];
     }
 
     /**
