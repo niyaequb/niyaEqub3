@@ -6,6 +6,7 @@ use App\Models\EqubPayment;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
+use Filament\Actions\ViewAction;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
@@ -171,7 +172,25 @@ class EqubPaymentsTable
                     ->label('Our Reference')
                     ->searchable()
                     ->copyable()
-                    ->toggleable(isToggledHiddenByDefault: true),
+                    ->toggleable(),
+
+                // WHEN THE TRANSACTION BEGAN — the moment the member tapped Pay
+                // and this order was created.
+                //
+                // Three different times live on this row and collapsing any two
+                // of them is what made the table misleading before:
+                //
+                //   Due Date  the round this contribution belongs to
+                //   Date      when the member started paying
+                //   Settled   when the bank confirmed the money moved
+                //
+                // The gap between the last two is how long settlement took, and
+                // a widening gap is the first sign something is wrong with it.
+                TextColumn::make('created_at')
+                    ->label('Date')
+                    ->dateTime('d M Y, H:i')
+                    ->sortable()
+                    ->toggleable(),
 
                 TextColumn::make('batch_reference')
                     ->label('Batch')
@@ -213,6 +232,7 @@ class EqubPaymentsTable
                         ->whereNull('bank_transaction_id')),
             ])
             ->recordActions([
+                ViewAction::make(),
                 EditAction::make()
                     ->visible(fn (): bool => Auth::check()
                         && (Auth::user()->hasRole('Super Admin') || Auth::user()->can('equb-payments.edit'))),

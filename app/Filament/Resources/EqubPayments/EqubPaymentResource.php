@@ -5,7 +5,9 @@ namespace App\Filament\Resources\EqubPayments;
 use App\Filament\Resources\EqubPayments\Pages\CreateEqubPayment;
 use App\Filament\Resources\EqubPayments\Pages\EditEqubPayment;
 use App\Filament\Resources\EqubPayments\Pages\ListEqubPayments;
+use App\Filament\Resources\EqubPayments\Pages\ViewEqubPayment;
 use App\Filament\Resources\EqubPayments\Schemas\EqubPaymentForm;
+use App\Filament\Resources\EqubPayments\Schemas\EqubPaymentInfolist;
 use App\Filament\Resources\EqubPayments\Tables\EqubPaymentsTable;
 use App\Models\EqubPayment;
 use BackedEnum;
@@ -46,6 +48,11 @@ class EqubPaymentResource extends Resource
         return EqubPaymentForm::configure($schema);
     }
 
+    public static function infolist(Schema $schema): Schema
+    {
+        return EqubPaymentInfolist::configure($schema);
+    }
+
     public static function table(Table $table): Table
     {
         return EqubPaymentsTable::configure($table);
@@ -53,7 +60,14 @@ class EqubPaymentResource extends Resource
 
     public static function getEloquentQuery(): \Illuminate\Database\Eloquent\Builder
     {
-        return parent::getEloquentQuery()->with(['membership.member.user', 'membership.equbGroup.package']);
+        // sponsor is loaded because a responsibility seat names the person who
+        // actually paid, and the table shows it on every row — without it that
+        // is one query per row.
+        return parent::getEloquentQuery()->with([
+            'membership.member.user',
+            'membership.sponsor',
+            'membership.equbGroup.package',
+        ]);
     }
 
     public static function getPages(): array
@@ -61,6 +75,7 @@ class EqubPaymentResource extends Resource
         return [
             'index' => ListEqubPayments::route('/'),
             'create' => CreateEqubPayment::route('/create'),
+            'view' => ViewEqubPayment::route('/{record}'),
             'edit' => EditEqubPayment::route('/{record}/edit'),
         ];
     }
