@@ -353,6 +353,13 @@ class EnvService
     public const GATEWAY_KEYS = [
         'MERCHANT_CODE' => '',
         'MERCHANT_APP_ID' => '',
+        // The merchant's id in the BANK'S OWN REGISTRY, and not the same thing
+        // as either neighbour despite reading like both. Dashen's
+        // getfabrictoken accepts only this one (6a8bea061fc8d19411db02ee);
+        // MERCHANT_CODE names the settlement account and goes in biz_content;
+        // MERCHANT_APP_ID is the numeric id from the credentials sheet that
+        // nothing currently reads. None is derivable from another.
+        'MERCHANT_ID' => '',
         'FABRIC_APP_ID' => '',
         'MINI_APP_CODE' => '',
         'SHORT_CODE' => '',
@@ -367,6 +374,20 @@ class EnvService
         'RSA_PADDING' => 'oaep',
         'BASE_URL' => '',
         'TOKEN_PATH' => '',
+        // Where the access token for an order is minted. Falls back to
+        // TOKEN_PATH when blank, because on Dashen they are the same endpoint.
+        // With neither set, every order is refused as "Incomplete request" —
+        // see FabricGateway::fabricToken().
+        'FABRIC_TOKEN_PATH' => '',
+        // UAT ONLY, AND IT MUST BE BLANK IN PRODUCTION.
+        //
+        // Stands in for the customer identifier the bank's host app supplies,
+        // so the payment path can be exercised from an ordinary browser before
+        // the mini app is loaded into the SuperApp. The token minted from it
+        // carries one real customer's name and phone number, so leaving it set
+        // in production would stamp that person's identity on every member's
+        // order.
+        'CUSTOMER_IDENTIFIER' => '',
         'ORDER_QUERY_PATH' => '',
     ];
 

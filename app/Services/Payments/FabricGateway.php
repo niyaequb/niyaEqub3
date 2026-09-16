@@ -470,18 +470,39 @@ abstract class FabricGateway implements PaymentGateway
     }
 
     /**
-     * Fields signed into `sign` when the bank has not told us otherwise.
+     * Fields encrypted into `sign` when the bank has not told us otherwise.
      *
-     * Every top-level key that exists at signing time — i.e. the whole request
-     * object, matching `encryptPayload({...req})` in the vendor sample.
+     * JUST THE TIMESTAMP. Dashen's answer, verbatim, 16 Sep 2026:
      *
-     * A bank on a 2048-bit key cannot fit this and must override with a
-     * narrower list; encryptPayload() throws with that instruction rather than
-     * truncating.
+     *     "Encrypt only JSON.stringify({ timestamp }) with the public key."
+     *
+     * This was wrong here for six weeks, and the wrong answer was a careful
+     * one. The vendor sample calls pickKeys(body, keysToPick), never says what
+     * keysToPick holds, then passes the whole request into
+     * encryptPayload({...req}) — which reads like a whitelist of every
+     * top-level key present at that point. So the default was the full set.
+     *
+     * The bank accepted those orders, carried them all the way to a PIN
+     * prompt, and only then answered "invalid signature": a message naming no
+     * field, raised on a request this server never makes. Only Dashen hold the
+     * private key, so nothing checkable from this side could ever have seen
+     * inside it. When a field is encrypted with someone else's key, asking
+     * them is not the last resort — it is the only tool.
+     *
+     * Two consequences worth keeping:
+     *
+     *   The RSA headroom problem is gone. Encrypting ~30 bytes instead of ~436
+     *   means the reference format and the 50-character narration cap are no
+     *   longer load-bearing on the key size.
+     *
+     *   `sign` IS NOT INTEGRITY PROTECTION. A timestamp says nothing about the
+     *   amount, the merchant or the order; it is a freshness proof.
+     *   `confirmpayload` is what binds the order together. Never add a field
+     *   to `biz_content` believing `sign` covers it.
      */
     protected function defaultSignKeys(): string
     {
-        return 'timestamp,nonce_str,method,version,biz_content';
+        return 'timestamp';
     }
 
     /**
