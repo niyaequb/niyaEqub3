@@ -118,6 +118,26 @@ interface PaymentGateway
     public function extractReference(array $payload): ?string;
 
     /**
+     * Pull the bank's own record of a settled transaction out of a verified
+     * response, in the one shape the platform stores.
+     *
+     * This is the other half of a settled contribution. The row already knows
+     * what was OWED — the membership, the amount due, the round it belongs to.
+     * None of that says when money moved, who moved it, or what the bank calls
+     * the transaction, and those are what somebody needs when a member says "I
+     * paid and it is not showing" or when a row has to be matched against a
+     * statement.
+     *
+     * Every bank spells these differently, which is exactly why the translation
+     * belongs here and the columns do not. Return only the keys this bank
+     * actually publishes; anything absent is left unknown rather than invented.
+     *
+     * @param  array<mixed>  $data  The verified response from verifyPayment()
+     * @return array{transaction_id?: ?string, bank_reference?: ?string, paid_at?: mixed, amount?: mixed, payer_name?: ?string, payer_phone?: ?string, payer_account?: ?string, receipt_url?: ?string, payload?: ?array}
+     */
+    public function extractSettlement(array $data): array;
+
+    /**
      * Exchange a host-app customer identifier for a session and an identity.
      *
      * Only meaningful where the bank hosts the app and can say who is using

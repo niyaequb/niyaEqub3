@@ -809,6 +809,23 @@ abstract class FabricGateway implements PaymentGateway
         return $reference !== null ? (string) $reference : null;
     }
 
+    /**
+     * Keep the response and claim nothing about its contents.
+     *
+     * There is no fabric-wide shape for a settled transaction to map from —
+     * `createorder` is standardised across these banks and their status
+     * responses are not. Dashen's is nothing like the fabric scheme at all.
+     *
+     * So the base class does the one honest thing: stores the whole response,
+     * so a reconciliation question a year from now has something to read, and
+     * leaves every named field unknown. A bank that publishes them overrides
+     * this; see DashenGateway.
+     */
+    public function extractSettlement(array $data): array
+    {
+        return ['payload' => $data === [] ? null : $data];
+    }
+
     // ---------------------------------------------------------------------
     // Customer identity
     // ---------------------------------------------------------------------

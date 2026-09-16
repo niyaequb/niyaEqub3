@@ -108,7 +108,11 @@ class PaymentSettlementService
             return $this->handleUnverified($gateway, $payments, $reference, $verification);
         }
 
-        return $this->markSettled($payments, $reference);
+        return $this->markSettled(
+            $payments,
+            $reference,
+            $gateway->extractSettlement((array) ($verification['data'] ?? []))
+        );
     }
 
     /**
@@ -165,7 +169,11 @@ class PaymentSettlementService
             return $this->handleUnverified($gateway, $payments, $reference, $verification);
         }
 
-        return $this->markSettled($payments, $reference);
+        return $this->markSettled(
+            $payments,
+            $reference,
+            $gateway->extractSettlement((array) ($verification['data'] ?? []))
+        );
     }
 
     /**
@@ -304,7 +312,7 @@ class PaymentSettlementService
      * a replayed or duplicated notification cannot double-settle a
      * contribution or send a second receipt.
      */
-    protected function markSettled($payments, string $reference): array
+    protected function markSettled($payments, string $reference, array $settlement = []): array
     {
         $settled = collect();
 
@@ -321,7 +329,10 @@ class PaymentSettlementService
                 continue;
             }
 
-            $payment->markAsPaid();
+            // The same settlement on every row in a batch, which is correct:
+            // one bank transaction paid for all of them, and every row should
+            // carry the transaction id somebody will search for.
+            $payment->markAsPaid($settlement);
             $settled->push($payment);
 
             if ($membership = $payment->membership) {

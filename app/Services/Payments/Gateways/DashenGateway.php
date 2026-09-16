@@ -3,6 +3,7 @@
 namespace App\Services\Payments\Gateways;
 
 use App\Services\Payments\FabricGateway;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -246,6 +247,67 @@ class DashenGateway extends FabricGateway
                 ? 'The bank has no record of this order yet.'
                 : 'The bank did not confirm this payment either way.',
             'data' => $data,
+        ];
+    }
+
+    /**
+     * What Dashen tell us about a transaction that settled.
+     *
+     * Mapped from a real `check-status` response:
+     *
+     *     data.trxnID              -> transaction_id  MAPS3499011974423323
+     *     data.FTNumber            -> bank_reference  444MAPS23213012Y
+     *     data.paymentTime         -> paid_at         2026-09-16T11:26:57.328Z
+     *     data.amount.total_amount -> amount          1889
+     *     data.phoneNumber         -> payer_phone     +251900751969
+     *     data.debit_account       -> payer_account   5444484413011
+     *     data.receipt_link        -> receipt_url     a page the member can open
+     *
+     * `paid_at` is the one to be careful about. It is when the money moved,
+     * which is NOT payment_date — that is the round the contribution belongs
+     * to, routinely weeks earlier. Showing one where the other belongs is what
+     * made the admin table read "Sep 4" for a payment made on the 16th.
+     *
+     * The payer's NAME is not in this response, only their phone and account,
+     * even though the SuperApp receipt displays it. Left unknown rather than
+     * filled in from the membership: the entire value of these columns is that
+     * they say what the BANK says, and a name copied from our own records
+     * would quietly destroy that.
+     *
+     * A malformed date is caught rather than thrown. Failing to parse a
+     * timestamp is not a reason to abandon crediting a payment the bank has
+     * already confirmed — the money moved either way, and the raw value
+     * survives in the payload.
+     */
+    public function extractSettlement(array $data): array
+    {
+        $body = (array) data_get($data, 'data', []);
+
+        $paidAt = trim((string) (data_get($body, 'paymentTime') ?: data_get($body, 'trxn_date')));
+
+        try {
+            $paidAt = $paidAt !== '' ? Carbon::parse($paidAt) : null;
+        } catch (\Throwable $e) {
+            Log::warning('Could not read the settlement time from the bank response', [
+                'gateway' => $this->slug(),
+                'value' => $paidAt,
+            ]);
+
+            $paidAt = null;
+        }
+
+        return [
+            'transaction_id' => data_get($body, 'trxnID'),
+            'bank_reference' => data_get($body, 'FTNumber') ?: data_get($body, 'endToEndId'),
+            'paid_at' => $paidAt,
+            'amount' => data_get($body, 'amount.total_amount'),
+            'payer_phone' => data_get($body, 'phoneNumber'),
+            'payer_account' => data_get($body, 'debit_account'),
+            'receipt_url' => data_get($body, 'receipt_link'),
+            // The whole response, credit_account and internalCode included.
+            // Fields nobody thought to model are the ones a reconciliation
+            // dispute turns on a year later.
+            'payload' => $data === [] ? null : $data,
         ];
     }
 
