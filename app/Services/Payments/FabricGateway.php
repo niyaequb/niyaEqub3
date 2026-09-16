@@ -321,7 +321,27 @@ abstract class FabricGateway implements PaymentGateway
             );
         }
 
-        $identifier = trim((string) ($customerIdentifier ?: $this->setting('CUSTOMER_IDENTIFIER')));
+        $identifier = trim((string) $customerIdentifier);
+
+        if ($identifier === '') {
+            $identifier = trim((string) $this->setting('CUSTOMER_IDENTIFIER'));
+
+            if ($identifier !== '') {
+                // A UAT crutch, logged every time it is used so it cannot go
+                // to production unnoticed. The bank mints this order's token
+                // from the identifier, so every order signed this way carries
+                // one fixed person's identity while somebody else authorises
+                // the payment with their PIN. The bank refuses that, and it
+                // surfaces as "invalid signature" — a message that names
+                // nothing and sends you looking at your payload for a week.
+                Log::warning(
+                    'Falling back to the configured customer identifier: the client sent none. '
+                    .'Correct for UAT, WRONG for production — clear '
+                    .$this->envPrefix().'_CUSTOMER_IDENTIFIER before go-live.',
+                    ['gateway' => $this->slug()]
+                );
+            }
+        }
 
         $body = [
             'stage' => $this->stage(),
