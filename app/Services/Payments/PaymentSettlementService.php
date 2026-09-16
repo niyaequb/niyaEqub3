@@ -94,6 +94,57 @@ class PaymentSettlementService
     }
 
     /**
+     * Settle a reference by ASKING the bank, with no notification involved.
+     *
+     * WHY THERE IS NO SIGNATURE CHECK HERE
+     *
+     * settle() begins by authenticating a message that arrived unprompted from
+     * the outside; anyone can POST to that route, so the signature is the only
+     * thing separating a bank from an attacker. This method starts the other
+     * way round: WE call the bank, over TLS, with our own credentials, and
+     * read the reply to a question we asked. There is no untrusted inbound
+     * message to authenticate — the trust comes from having made the call.
+     *
+     * That is what makes settlement possible without a webhook. Dashen send
+     * nothing unprompted, so the client callback becomes a trigger to ask, and
+     * ReconcilePendingPayments sweeps up everything whose callback never
+     * arrived because a member closed the app or lost signal.
+     *
+     * Everything after the question is identical to the notification path:
+     * same resolution, same verification, same crediting, same one-receipt-
+     * per-payer. Only the way the news reaches us differs.
+     *
+     * @return array{success: bool, message: string, payments?: \Illuminate\Support\Collection}
+     */
+    public function reconcile(PaymentGateway $gateway, string $reference): array
+    {
+        $payments = $this->resolve($reference);
+
+        if ($payments->isEmpty()) {
+            return ['success' => false, 'message' => 'Payment not found'];
+        }
+
+        // Nothing left to do, and worth answering before spending a call on
+        // the bank: a sweep runs over the same rows repeatedly until they
+        // leave the pending state.
+        if ($payments->every(fn (EqubPayment $payment) => ! $payment->isPending())) {
+            return [
+                'success' => true,
+                'message' => 'Already settled',
+                'payments' => $payments,
+            ];
+        }
+
+        $verification = $gateway->verifyPayment($reference);
+
+        if (! ($verification['success'] ?? false)) {
+            return $this->handleUnverified($gateway, $payments, $reference, $verification);
+        }
+
+        return $this->markSettled($payments, $reference);
+    }
+
+    /**
      * Find the contributions a reference stands for.
      *
      * Two stages, in this order: an exact match on `reference` first, and only
@@ -117,16 +168,25 @@ class PaymentSettlementService
     /**
      * The bank did not confirm the charge.
      *
-     * Two very different situations, and collapsing them would be a mistake:
+     * THREE situations, and collapsing any two of them would be a mistake:
      *
-     *   Verification is not wired up — an integration gap. The charge may well
-     *   have succeeded and we simply cannot ask. Leaving the rows pending
-     *   keeps the money visible as unreconciled instead of writing off a real
-     *   payment, which a member would experience as being charged and not
-     *   credited.
+     *   `unconfigured` — verification is not wired up at all. An integration
+     *   gap. The charge may well have succeeded and we simply cannot ask.
      *
-     *   The bank answered and said no — a failed charge. Mark it failed so the
-     *   member is not shown a contribution that will never complete.
+     *   `pending` — we asked and got no clear answer: the bank was
+     *   unreachable, the token could not be minted, or the status it returned
+     *   is one nobody has told us the meaning of yet. Not evidence of failure.
+     *
+     *   Neither flag — the bank answered and said no. A failed charge. Mark it
+     *   failed so the member is not shown a contribution that will never
+     *   complete.
+     *
+     * The first two leave the rows pending, which keeps the money visible as
+     * unreconciled instead of writing off a real payment — something a member
+     * experiences as being charged and not credited, and which they have no
+     * way to argue with. An operator looking at a stuck row is the cheaper
+     * mistake by a wide margin, so anything short of an explicit "no" from the
+     * bank lands here.
      */
     protected function handleUnverified(
         PaymentGateway $gateway,
@@ -134,7 +194,7 @@ class PaymentSettlementService
         string $reference,
         array $verification,
     ): array {
-        if ($verification['unconfigured'] ?? false) {
+        if (($verification['unconfigured'] ?? false) || ($verification['pending'] ?? false)) {
             Log::warning('Settlement left pending: cannot verify with the bank', [
                 'gateway' => $gateway->slug(),
                 'reference' => $reference,

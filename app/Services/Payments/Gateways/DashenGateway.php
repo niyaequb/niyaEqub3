@@ -3,14 +3,16 @@
 namespace App\Services\Payments\Gateways;
 
 use App\Services\Payments\FabricGateway;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Dashen Bank SuperApp — mini app payments.
  *
  * The first bank on the platform, and the reference implementation for the
  * rest. Almost everything it does is the fabric scheme, so almost all of it
- * lives in FabricGateway; what is left here is Dashen's identity and the two
- * places its integration pack is silent.
+ * lives in FabricGateway; what is left here is Dashen's identity and the one
+ * place their API leaves the scheme behind.
  *
  * HOW A PAYMENT ACTUALLY HAPPENS
  *
@@ -18,28 +20,228 @@ use App\Services\Payments\FabricGateway;
  * and reaches it over a JavaScript bridge, `window.dashenbanksuperapp`. This
  * class produces a signed order payload; the mini app hands it to the SuperApp
  * with `initiatePayment`; the SuperApp collects the customer's authorisation.
- * There is no URL to open and no page we control, which is why the client
- * config below describes a bridge rather than a checkout link.
+ * There is no URL to open and no page we control.
  *
- * WHAT DASHEN HAS NOT SUPPLIED
+ * WHAT DASHEN STILL HAVE NOT SUPPLIED
  *
- * Two things, both reached through config so that filling them in is an .env
- * change rather than a code change:
+ * A settlement notification. There is no webhook: nothing from Dashen ever
+ * arrives unprompted, so nothing tells this server that money moved.
  *
- *   DASHEN_ORDER_QUERY_PATH — confirms a transaction settled. Until it is set,
- *   canVerifySettlement() is false and PaymentSettlementService leaves
- *   contributions pending. That is the safe direction: an unverifiable payment
- *   showing as unreconciled is a visible problem, whereas crediting a member
- *   for money nobody confirmed is an invisible one.
- *
- *   DASHEN_TOKEN_PATH — exchanges a customeridentifier for a fabric token, and
- *   is what makes "Login with DBSA" work. Without it the app falls back to
- *   ordinary phone-and-OTP sign-in, so nobody is locked out.
+ * That used to mean manual reconciliation. It no longer does — `check-status`
+ * (below) lets us ask. The client callback is the trigger and a scheduled
+ * sweep catches the rest; see ReconcilePendingPayments. A webhook would still
+ * be cheaper than polling, but it is now an optimisation rather than the thing
+ * the integration is waiting for.
  */
 class DashenGateway extends FabricGateway
 {
     public function slug(): string
     {
         return 'dashen';
+    }
+
+    /**
+     * Ask Dashen whether a transaction actually completed.
+     *
+     * WHY THIS IS OVERRIDDEN RATHER THAN CONFIGURED
+     *
+     * FabricGateway::verifyPayment() builds the fabric scheme — timestamp,
+     * nonce_str, method, version, biz_content, an RSA `sign` and an HMAC
+     * `confirmpayload` — because that is what `createorder` takes.
+     *
+     * `check-status` takes none of it:
+     *
+     *     POST {BASE_URL}/v2.0/chatbirrapi/miniapps/apps/check-status
+     *     x-api-key:      {app secret}
+     *     x-access-token: {fabric token}
+     *     { "order_id": "...", "stage": "uat", "isFuelPayment": false }
+     *
+     * Three plain fields, no signing at all, and unlike `createorder` it wants
+     * the fabric token as well as the api key. Bending the parent method into
+     * that shape with configuration would have left a method that reads like
+     * the fabric scheme and is not one.
+     *
+     * THE TOKEN HAS NO CUSTOMER
+     *
+     * Verification runs from a scheduled job, long after the member has put
+     * their phone away, so there is nobody to mint a customer token for.
+     * Dashen answer a `getfabrictoken` call with no `customeridentifier` with
+     * a service token — "Super Admin" — and that is what is used here. It is
+     * why this needs no per-payment identifier stored anywhere.
+     *
+     * FAILING CLOSED, IN BOTH DIRECTIONS
+     *
+     * Three outcomes, not two, and the third is the one that matters:
+     *
+     *   settled            -> credit it
+     *   a status we KNOW   -> mark it failed
+     *   is terminal
+     *   anything else      -> LEAVE IT PENDING
+     *
+     * Dashen have not yet told us the full list of statuses `check-status` can
+     * return. Treating an unrecognised one as failure would mark a live
+     * payment dead while the money was still moving — a member debited and
+     * shown nothing. Treating it as pending costs an operator a look. Those
+     * are not comparable mistakes, so the unknown case is pending and stays
+     * pending until somebody confirms what the value means.
+     *
+     * @return array{success: bool, message?: string, data?: mixed, unconfigured?: bool, pending?: bool}
+     */
+    public function verifyPayment(string $reference): array
+    {
+        if (! $this->canVerifySettlement()) {
+            Log::warning('Settlement verification skipped: order query endpoint not configured', [
+                'gateway' => $this->slug(),
+                'reference' => $reference,
+            ]);
+
+            return [
+                'success' => false,
+                'unconfigured' => true,
+                'message' => $this->displayName().' order verification endpoint is not configured.',
+            ];
+        }
+
+        // A token failure is a problem with US reaching THEM. It says nothing
+        // about whether the customer paid, so it must never mark a payment
+        // failed — hence pending rather than a bare false.
+        try {
+            $token = $this->fabricToken();
+        } catch (\Throwable $e) {
+            Log::error('Could not mint a token to verify a payment', [
+                'gateway' => $this->slug(),
+                'reference' => $reference,
+                'error' => $e->getMessage(),
+            ]);
+
+            return [
+                'success' => false,
+                'pending' => true,
+                'message' => 'Could not authenticate with '.$this->displayName().' to verify this payment.',
+            ];
+        }
+
+        try {
+            $response = Http::withHeaders([
+                'Content-Type' => 'application/json',
+                'x-api-key' => $this->appSecret(),
+                'x-access-token' => $token,
+            ])->timeout(30)->post($this->endpoint('ORDER_QUERY_PATH'), [
+                'order_id' => $reference,
+                'stage' => $this->stage(),
+                // Dashen use one endpoint for fuel payments too, where it
+                // changes how the transaction is read. Never true for Equb
+                // contributions; exposed as a setting only so a future
+                // service does not need a code change.
+                'isFuelPayment' => filter_var(
+                    $this->setting('IS_FUEL_PAYMENT', 'false'),
+                    FILTER_VALIDATE_BOOL
+                ),
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('Payment verification could not reach the bank', [
+                'gateway' => $this->slug(),
+                'reference' => $reference,
+                'error' => $e->getMessage(),
+            ]);
+
+            return [
+                'success' => false,
+                'pending' => true,
+                'message' => 'Could not reach '.$this->displayName().' to verify this payment.',
+            ];
+        }
+
+        $data = $response->json();
+
+        // data.transactionStatus is where Dashen put it. The flatter spellings
+        // behind it are what the fabric scheme uses and cost nothing to keep,
+        // in case a later revision moves back.
+        $status = strtoupper(trim((string) (
+            data_get($data, 'data.transactionStatus')
+            ?? data_get($data, 'transactionStatus')
+            ?? data_get($data, 'biz_content.trade_status')
+            ?? data_get($data, 'trade_status')
+            ?? ''
+        )));
+
+        if ($response->successful() && in_array($status, $this->settledStatuses(), true)) {
+            // The bank's own references for this transaction. Logged rather
+            // than stored because there is nowhere to put them yet; they are
+            // what an operator matches against a statement line, so having
+            // them in the log is worth more than not having them at all.
+            Log::info('Payment verified with the bank', [
+                'gateway' => $this->slug(),
+                'reference' => $reference,
+                'status' => $status,
+                'trxn_id' => data_get($data, 'data.trxnID'),
+                'ft_number' => data_get($data, 'data.FTNumber'),
+                'amount' => data_get($data, 'data.amount.total_amount'),
+                'credit_account' => data_get($data, 'data.credit_account'),
+                'receipt' => data_get($data, 'data.receipt_link'),
+            ]);
+
+            return [
+                'success' => true,
+                'data' => $data,
+                'message' => 'Payment verified successfully',
+            ];
+        }
+
+        if ($status !== '' && in_array($status, $this->failedStatuses(), true)) {
+            Log::info('Bank reports this payment as failed', [
+                'gateway' => $this->slug(),
+                'reference' => $reference,
+                'status' => $status,
+            ]);
+
+            return [
+                'success' => false,
+                'data' => $data,
+                'message' => data_get($data, 'message') ?: 'The charge was not successful.',
+            ];
+        }
+
+        // The important branch. Unknown status, unexpected HTTP code, an order
+        // the bank has not heard of yet — all of it leaves the contribution
+        // exactly where it is.
+        Log::warning('Payment verification was inconclusive; leaving pending', [
+            'gateway' => $this->slug(),
+            'reference' => $reference,
+            'http' => $response->status(),
+            'status' => $status !== '' ? $status : '(none returned)',
+            'body' => $data,
+        ]);
+
+        return [
+            'success' => false,
+            'pending' => true,
+            'message' => 'The bank did not confirm this payment either way.',
+            'data' => $data,
+        ];
+    }
+
+    /**
+     * Statuses that mean the charge is definitively dead.
+     *
+     * Deliberately a short, explicit list rather than "anything that is not
+     * success". Ask Dashen for the full set and add to it; until then an
+     * unlisted value leaves the contribution pending, which is the safe
+     * direction. Override with DASHEN_FAILED_STATUSES, comma separated.
+     *
+     * @return array<int, string>
+     */
+    protected function failedStatuses(): array
+    {
+        $configured = trim((string) $this->setting('FAILED_STATUSES'));
+
+        if ($configured !== '') {
+            return array_values(array_filter(array_map(
+                fn ($value) => strtoupper(trim($value)),
+                explode(',', $configured)
+            )));
+        }
+
+        return ['FAILED', 'CANCELLED', 'CANCELED', 'EXPIRED', 'REJECTED', 'DECLINED', 'REVERSED'];
     }
 }

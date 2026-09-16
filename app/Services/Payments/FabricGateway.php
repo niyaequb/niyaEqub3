@@ -402,6 +402,38 @@ abstract class FabricGateway implements PaymentGateway
             );
         }
 
+        // RECORD WHOSE IDENTITY THIS ORDER WILL CARRY.
+        //
+        // Added after a UAT failure that took a day to reason about: an order
+        // was built, signed, accepted and then refused at the PIN prompt, and
+        // there was no way to tell from this side which customer the bank had
+        // minted the token for. The absence of the fallback warning proved
+        // only that the client sent SOMETHING, not that it sent the right
+        // person.
+        //
+        // The code alone, never the name or the phone number. Those are in the
+        // claims as well and do not belong in a log file that gets tailed,
+        // grepped and pasted into chat threads. The code is enough to answer
+        // the only question that matters here: was this token issued for the
+        // person who was actually holding the phone?
+        $subject = null;
+        $parts = explode('.', $token);
+
+        if (count($parts) === 3) {
+            $claims = json_decode(
+                (string) base64_decode(strtr($parts[1], '-_', '+/'), false),
+                true
+            );
+
+            $subject = data_get($claims, 'customer.userCode');
+        }
+
+        Log::info('Fabric token issued', [
+            'gateway' => $this->slug(),
+            'customer' => $subject ?: '(not in claims)',
+            'source' => trim((string) $customerIdentifier) !== '' ? 'client' : 'configured',
+        ]);
+
         return $token;
     }
 
