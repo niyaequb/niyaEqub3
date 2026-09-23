@@ -150,7 +150,25 @@ class ReportRenderService
         $out .= $alignLeft.$line;
 
         $out .= $row(__('filament.equb_report.collected'), $money($summary['collected']));
-        $out .= $row(__('filament.equb_report.outstanding'), $money($summary['outstanding']));
+
+        // The split, on the paper as well as on the screen. A printed total
+        // that reads as income is how the wrong figure ends up in a meeting.
+        if (isset($report['profit'])) {
+            $out .= $row(__('filament.equb_report.members_money'), $money($report['profit']['member_share']));
+            $out .= $row(
+                __('filament.equb_report.service_fee').' ('.$report['profit']['rate'].'%)',
+                $money($report['profit']['fee'])
+            );
+        }
+
+        // Arrears as at the end of the window, from the contribution schedule
+        // rather than from pending payment rows — which is why it can be a
+        // large number on a day when nothing was left pending.
+        if (isset($report['receivables'])) {
+            $out .= $row(__('filament.equb_report.outstanding'), $money($report['receivables']['arrears']));
+        }
+
+        $out .= $row(__('filament.equb_report.pending'), $money($summary['outstanding']));
         $out .= $row(__('filament.equb_report.transactions'), (string) number_format($summary['transactions']));
         $out .= $row(__('filament.equb_report.settled'), (string) number_format($summary['paid_count']));
         $out .= $row(__('filament.equb_report.failed'), (string) number_format($summary['failed_count']));

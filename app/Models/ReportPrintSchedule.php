@@ -27,6 +27,7 @@ class ReportPrintSchedule extends Model
         'day_of_month',
         'timezone',
         'delivery',
+        'target_station_id',
         'format',
         'paper',
         'copies',
@@ -41,6 +42,9 @@ class ReportPrintSchedule extends Model
         'next_run_at',
         'last_status',
         'last_error',
+        'consecutive_failures',
+        'paused_at',
+        'paused_reason',
         'created_by',
     ];
 
@@ -53,8 +57,10 @@ class ReportPrintSchedule extends Model
             'day_of_week' => 'integer',
             'day_of_month' => 'integer',
             'printer_port' => 'integer',
+            'consecutive_failures' => 'integer',
             'last_run_at' => 'datetime',
             'next_run_at' => 'datetime',
+            'paused_at' => 'datetime',
         ];
     }
 
@@ -77,6 +83,19 @@ class ReportPrintSchedule extends Model
     public function jobs(): HasMany
     {
         return $this->hasMany(ReportPrintJob::class);
+    }
+
+    /**
+     * The desk this schedule prints at.
+     *
+     * Null means any agent may take it, which is right for a single-printer
+     * office and wrong the moment a second branch opens one — an unrouted job
+     * goes to whichever browser polls first, and half the time that is the
+     * thermal receipt printer two towns away.
+     */
+    public function targetStation(): BelongsTo
+    {
+        return $this->belongsTo(PrintStation::class, 'target_station_id');
     }
 
     public function creator(): BelongsTo
@@ -150,20 +169,89 @@ class ReportPrintSchedule extends Model
         ];
     }
 
-    /** Marks a completed run and books the next one. */
+    /**
+     * Marks a completed run and books the next one.
+     *
+     * A run that failed is counted, not just recorded. One failure is a jam or
+     * a tab that was closed; seven in a row is a schedule pointed at a printer
+     * that no longer exists, and left alone it will keep rendering a report
+     * every morning for months and throwing it away. After enough of them the
+     * schedule pauses itself and says so, which is the difference between a
+     * system that degrades quietly and one that asks for help.
+     */
     public function markRun(string $status, ?string $error = null): void
     {
         $now = CarbonImmutable::now();
+        $failed = $status === 'failed';
 
-        $this->forceFill([
+        $failures = $failed ? (int) $this->consecutive_failures + 1 : 0;
+        $limit = max(0, (int) config('printing.agent.pause_schedule_after', 7));
+        $shouldPause = $limit > 0 && $failures >= $limit;
+
+        $values = [
             'last_run_at' => $now,
             'last_status' => $status,
-            'last_error' => $error,
-            // Always advance, even on failure. A jammed printer should not
-            // cause the runner to retry the same report every 60 seconds and
-            // fill the queue with hundreds of identical jobs.
-            'next_run_at' => $this->is_active ? $this->calculateNextRun($now) : null,
+            'last_error' => $error === null ? null : mb_substr($error, 0, 2000),
+            'consecutive_failures' => $failures,
+        ];
+
+        if ($shouldPause) {
+            $values['is_active'] = false;
+            $values['paused_at'] = $now;
+            $values['paused_reason'] = __('filament.print_agent.paused_after_failures', [
+                'count' => $failures,
+                'error' => mb_substr((string) $error, 0, 200),
+            ]);
+        } elseif (! $failed && $this->paused_at !== null) {
+            // A successful run clears an old pause note so the page does not
+            // keep explaining a problem that has since gone away.
+            $values['paused_at'] = null;
+            $values['paused_reason'] = null;
+        }
+
+        // Always advance, even on failure. A jammed printer should not cause
+        // the runner to retry the same report every 60 seconds and fill the
+        // queue with hundreds of identical jobs.
+        $active = $values['is_active'] ?? $this->is_active;
+        $values['next_run_at'] = $active ? $this->calculateNextRun($now) : null;
+
+        $this->forceFill($values)->saveQuietly();
+    }
+
+    /** Switched off by the system rather than by a person. */
+    public function isAutoPaused(): bool
+    {
+        return ! $this->is_active && $this->paused_at !== null;
+    }
+
+    /** Turn it back on and give it a clean slate. */
+    public function resume(): void
+    {
+        $this->forceFill([
+            'is_active' => true,
+            'consecutive_failures' => 0,
+            'paused_at' => null,
+            'paused_reason' => null,
+            'next_run_at' => $this->calculateNextRun(),
         ])->saveQuietly();
+    }
+
+    public function statusColor(): string
+    {
+        if ($this->isAutoPaused()) {
+            return 'danger';
+        }
+
+        if (! $this->is_active) {
+            return 'gray';
+        }
+
+        return match ($this->last_status) {
+            'failed' => 'danger',
+            'printed' => 'success',
+            'queued' => 'info',
+            default => 'gray',
+        };
     }
 
     public function frequencyLabel(): string

@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Member;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\Api\EqubGroupResource;
 use App\Models\EqubGroup;
+use App\Services\Payments\PaymentSettlementService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -112,6 +113,14 @@ class EqubGroupController extends Controller
                 ->orderByRaw('member_id is null')
                 ->orderBy('id');
         }]);
+
+        // This is the read the Equb screen makes, including the polls it makes
+        // right after a member returns from paying in the SuperApp. Any of the
+        // caller's contributions still waiting on the bank are checked once
+        // this response has gone, so the next poll shows them settled.
+        app(PaymentSettlementService::class)->verifyPendingAfterResponse(
+            $equbGroup->memberships->flatMap(fn ($membership) => $membership->payments)
+        );
 
         return response()->json([
             'status' => 'success',

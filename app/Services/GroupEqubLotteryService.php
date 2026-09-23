@@ -5,6 +5,9 @@ namespace App\Services;
 use App\Models\EqubDraw;
 use App\Models\EqubDrawWinner;
 use App\Models\EqubGroup;
+use App\Services\Equb\EqubLotteryEngine;
+use App\Services\Equb\EqubRules;
+use App\Support\Equb\DrawEntry;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -18,6 +21,20 @@ use Illuminate\Support\Facades\Log;
  * of 5, 4, 3 and 2 waiting picks 5 + 2, not 5 + 4.
  *
  * Manual mode: the admin hand-picks the winning groups.
+ *
+ * A GROUP IS ONLY AS ELIGIBLE AS ITS MEMBERS
+ *
+ * The pool used to be every group that had not won yet, regardless of whether
+ * anybody in it was paying. Because a whole group collects together, that let
+ * a family group where two of five had stopped contributing take a full round
+ * of everybody else's money.
+ *
+ * So each group is now screened member by member and the ones carrying
+ * arrears are held back with a reason attached. The groups that remain are
+ * weighted by how their members have behaved — a group that pays early and on
+ * time holds more of the pool than one scraping in late — which turns the
+ * whole thing from a lottery between groups into a lottery the members of a
+ * group can improve together.
  */
 class GroupEqubLotteryService
 {
@@ -25,39 +42,127 @@ class GroupEqubLotteryService
         protected SmsService $smsService,
         protected FcmService $fcmService,
         protected EqubGroupLedgerService $ledger,
+        protected EqubLotteryEngine $engine,
+        protected EqubRules $rules,
     ) {}
 
     /**
      * Group Equbs still in the running on this parent, each with its head-count.
      *
+     * Only groups that clear the standing check. `screen()` has the same list
+     * with the rejected ones and their reasons, which is what the draw modal
+     * shows.
+     *
      * @return Collection<int, EqubGroup>
      */
     public function pool(EqubGroup $parent): Collection
     {
-        return $parent->eligibleSubGroups()
+        return $this->screen($parent)
+            ->filter(fn (array $row): bool => $row['eligible'])
+            ->map(fn (array $row): EqubGroup => $row['group'])
+            ->values();
+    }
+
+    /**
+     * Every candidate group with its verdict.
+     *
+     * Each row carries the group, its head-count, whether it may be drawn,
+     * the combined weight of its members and — when it may not — the members
+     * holding it back. An admin about to run a round should be able to see
+     * that before pressing the button rather than wondering why a family they
+     * expected to be in the draw was not.
+     *
+     * @return Collection<int, array{group: EqubGroup, eligible: bool, weight: float, head_count: int, entries: Collection<int, DrawEntry>, blockers: Collection<int, DrawEntry>, reason: ?string}>
+     */
+    public function screen(EqubGroup $parent): Collection
+    {
+        $groups = $parent->eligibleSubGroups()
             ->with(['owner.user'])
             ->withCount(['memberships as head_count' => fn ($q) => $q->where('status', \App\Enums\EqubMembershipStatus::Active)])
             ->get()
             ->filter(fn (EqubGroup $g): bool => (int) $g->head_count > 0)
             ->values();
+
+        if ($groups->isEmpty()) {
+            return collect();
+        }
+
+        // Every active place across every candidate group, measured in one
+        // pass. Screening group by group would run a payments query per
+        // family and turn a forty-group Equb into forty round trips.
+        $memberships = \App\Models\EqubMembership::query()
+            ->with(['cohort', 'equbGroup', 'member', 'sponsor'])
+            ->whereIn('equb_group_id', $groups->pluck('id'))
+            ->where('status', \App\Enums\EqubMembershipStatus::Active)
+            ->get();
+
+        // Which group each place belongs to, as a lookup rather than a search
+        // per entry. firstWhere() inside the grouping turns a four-hundred
+        // place Equb into a hundred and sixty thousand comparisons every time
+        // the draw modal re-renders.
+        $groupOfMembership = $memberships->pluck('equb_group_id', 'id');
+
+        $entriesByGroup = $this->engine->entries($memberships)
+            ->groupBy(fn (DrawEntry $entry): int => (int) $groupOfMembership->get($entry->membershipId));
+
+        $allowedInArrears = $this->rules->groupMaxMembersInArrears();
+        $minEligible = $this->rules->groupMinEligibleMembers();
+
+        return $groups->map(function (EqubGroup $group) use ($entriesByGroup, $allowedInArrears, $minEligible): array {
+            $entries = $entriesByGroup->get($group->id, collect());
+            $blockers = $entries->filter(fn (DrawEntry $e): bool => $e->blocksGroup())->values();
+            $eligibleEntries = $entries->filter(fn (DrawEntry $e): bool => $e->eligible);
+
+            $reason = match (true) {
+                $entries->isEmpty() => __('filament.lottery.group_no_members'),
+                $blockers->count() > $allowedInArrears => __('filament.lottery.group_has_arrears', [
+                    'count' => $blockers->count(),
+                    'names' => $blockers->take(3)->pluck('name')->implode(', '),
+                ]),
+                $eligibleEntries->count() < $minEligible => __('filament.lottery.group_too_few_eligible', [
+                    'count' => $minEligible,
+                ]),
+                default => null,
+            };
+
+            return [
+                'group' => $group,
+                'eligible' => $reason === null,
+                // The group's share of the pool is the sum of its members'.
+                // A group of five punctual payers therefore outweighs a group
+                // of five who scrape in late, and a bigger group outweighs a
+                // smaller one — which is right, since it is also risking more.
+                'weight' => round((float) $eligibleEntries->sum(fn (DrawEntry $e): float => $e->weight), 4),
+                'head_count' => (int) $group->head_count,
+                'entries' => $entries,
+                'blockers' => $blockers,
+                'reason' => $reason,
+            ];
+        })->values();
     }
 
     /**
      * Choose whole groups whose combined head-count lands as close as possible
      * to $target without a wasteful overshoot.
      *
-     * Greedy on a shuffled pool: take any group that still fits, and once
-     * nothing fits exactly, accept the smallest remaining group to close the
-     * gap. Shuffling keeps it a lottery rather than a deterministic sort.
+     * Greedy on a weighted-random ordering: take any group that still fits,
+     * and once nothing fits exactly, accept the smallest remaining group to
+     * close the gap.
+     *
+     * The ordering used to be a plain shuffle, which made every group equally
+     * likely to be reached first. It is now drawn against the weights the
+     * engine assigned, so a group whose members pay early and on time comes up
+     * sooner more often — while still being a draw, not a ranking.
      *
      * @param  Collection<int, EqubGroup>  $pool
+     * @param  array<int, float>  $weights  Group id => weight. Equal if omitted.
      * @return Collection<int, EqubGroup>
      */
-    public function balanceToTarget(Collection $pool, int $target): Collection
+    public function balanceToTarget(Collection $pool, int $target, array $weights = [], ?string $seed = null): Collection
     {
         $target = max(1, $target);
         $chosen = collect();
-        $remaining = $pool->shuffle();
+        $remaining = $this->weightedOrder($pool, $weights, $seed);
         $filled = 0;
 
         // First pass: groups that fit inside the target exactly.
@@ -101,6 +206,53 @@ class GroupEqubLotteryService
     }
 
     /**
+     * Shuffle a pool so that heavier groups tend to come out first.
+     *
+     * The standard trick for weighted sampling without replacement: give each
+     * item the key U^(1/w) for a uniform U, and sort descending. An item with
+     * twice the weight is twice as likely to lead, and every item still has a
+     * real chance — which is what keeps this a lottery.
+     *
+     * With a seed the ordering is reproducible, so a round can be re-derived
+     * from what was recorded on the draw.
+     *
+     * @param  Collection<int, EqubGroup>  $pool
+     * @param  array<int, float>  $weights
+     * @return Collection<int, EqubGroup>
+     */
+    protected function weightedOrder(Collection $pool, array $weights, ?string $seed): Collection
+    {
+        if ($weights === []) {
+            return $pool->shuffle();
+        }
+
+        return $pool
+            ->map(function (EqubGroup $group, int $index) use ($weights, $seed): array {
+                $weight = max(0.0001, (float) ($weights[$group->id] ?? 1.0));
+
+                $u = $seed !== null
+                    ? $this->seededUnit($seed, $group->id)
+                    : (mt_rand(1, mt_getrandmax()) / (mt_getrandmax() + 1));
+
+                // Guard the log against a u that rounds to exactly zero.
+                $u = min(0.999999999, max(0.000000001, $u));
+
+                return ['group' => $group, 'key' => pow($u, 1 / $weight)];
+            })
+            ->sortByDesc('key')
+            ->map(fn (array $row): EqubGroup => $row['group'])
+            ->values();
+    }
+
+    /** A reproducible number in [0, 1) for one group under one seed. */
+    protected function seededUnit(string $seed, int $groupId): float
+    {
+        $hash = hash('sha256', $seed.':group:'.$groupId);
+
+        return hexdec(substr($hash, 0, 15)) / (hexdec('fffffffffffffff') + 1);
+    }
+
+    /**
      * Run a round on a parent Equb.
      *
      * @param  int[]  $manualGroupIds  Hand-picked winning Group Equbs.
@@ -116,13 +268,32 @@ class GroupEqubLotteryService
             return ['success' => false, 'message' => 'Pick a platform Equb group, not a Group Equb.'];
         }
 
-        $pool = $this->pool($parent);
+        $screened = $this->screen($parent);
+        $eligibleRows = $screened->filter(fn (array $row): bool => $row['eligible'])->values();
+        $pool = $eligibleRows->map(fn (array $row): EqubGroup => $row['group'])->values();
 
         if ($pool->isEmpty()) {
-            return ['success' => false, 'message' => 'No Group Equbs on this Equb are eligible yet.'];
+            // Say which wall was hit. "No groups are eligible" on an Equb with
+            // twelve waiting families is a message that sends somebody
+            // hunting through the database.
+            $held = $screened->filter(fn (array $row): bool => ! $row['eligible']);
+
+            return [
+                'success' => false,
+                'message' => $held->isEmpty()
+                    ? __('filament.lottery.no_pool')
+                    : __('filament.lottery.pool_all_groups_held', [
+                        'count' => $held->count(),
+                        'reason' => (string) $held->first()['reason'],
+                    ]),
+            ];
         }
 
         $isManual = $manualGroupIds !== [];
+        $seed = $this->engine->seed();
+        $weights = $eligibleRows
+            ->mapWithKeys(fn (array $row): array => [$row['group']->id => $row['weight']])
+            ->all();
 
         if ($isManual) {
             $winners = $pool->whereIn('id', $manualGroupIds)->values();
@@ -130,7 +301,7 @@ class GroupEqubLotteryService
             if ($winners->count() !== count(array_unique($manualGroupIds))) {
                 return [
                     'success' => false,
-                    'message' => 'Some of the selected Group Equbs are not eligible. They may have won already.',
+                    'message' => 'Some of the selected Group Equbs are not eligible. They may have won already, or a member is in arrears.',
                 ];
             }
         } else {
@@ -138,12 +309,14 @@ class GroupEqubLotteryService
                 return ['success' => false, 'message' => 'Enter how many members should win this round.'];
             }
 
-            $winners = $this->balanceToTarget($pool, $targetMembers);
+            $winners = $this->balanceToTarget($pool, $targetMembers, $weights, $seed);
         }
 
         if ($winners->isEmpty()) {
             return ['success' => false, 'message' => 'No combination of groups could be drawn for that target.'];
         }
+
+        $snapshot = $this->groupSnapshot($screened, $winners, $seed, $isManual);
 
         $membersWon = (int) $winners->sum(fn (EqubGroup $g): int => (int) $g->head_count);
         $perPerson = $parent->contributionPerPerson();
@@ -152,7 +325,7 @@ class GroupEqubLotteryService
         $this->announceStarted($parent, $round, $membersWon);
 
         try {
-            $draw = DB::transaction(function () use ($parent, $winners, $round, $membersWon, $perPerson, $executedByUserId, $isManual, $targetMembers) {
+            $draw = DB::transaction(function () use ($parent, $winners, $round, $membersWon, $perPerson, $executedByUserId, $isManual, $targetMembers, $seed, $snapshot, $screened) {
                 $firstMembership = $winners->first()->activeMemberships()->first();
 
                 $draw = EqubDraw::create([
@@ -166,6 +339,16 @@ class GroupEqubLotteryService
                     'notes' => $isManual
                         ? 'Manual group selection.'
                         : "Target {$targetMembers} members, drew {$membersWon}.",
+                    // A manual round records the seed too, even though nothing
+                    // was drawn against it. The rest of the snapshot — who was
+                    // eligible, who was held back and why — is the part that
+                    // matters when an admin's own choice is questioned later.
+                    'random_seed' => $seed,
+                    'pool_size' => $screened->count(),
+                    'excluded_count' => $screened->filter(fn (array $r): bool => ! $r['eligible'])->count(),
+                    'total_weight' => round((float) $screened->sum(fn (array $r): float => $r['eligible'] ? $r['weight'] : 0), 4),
+                    'winner_weight' => round((float) $winners->sum(fn (EqubGroup $g): float => (float) ($snapshot['weights'][$g->id] ?? 0)), 4),
+                    'eligibility_snapshot' => $snapshot,
                 ]);
 
                 foreach ($winners as $index => $group) {
@@ -216,6 +399,50 @@ class GroupEqubLotteryService
     }
 
     // -----------------------------------------------------------------
+
+    /**
+     * The round as it stood, for the audit trail.
+     *
+     * Group level rather than member level: a round here picks families, so
+     * that is the granularity a challenge would be about. Each row says what
+     * the group weighed, how many places it holds, and — for the ones held
+     * back — exactly which members were carrying arrears on the day.
+     *
+     * @param  Collection<int, array<string, mixed>>  $screened
+     * @param  Collection<int, EqubGroup>  $winners
+     * @return array<string, mixed>
+     */
+    protected function groupSnapshot(Collection $screened, Collection $winners, string $seed, bool $isManual): array
+    {
+        $winnerIds = $winners->pluck('id')->all();
+
+        return [
+            'algorithm' => $isManual ? 'manual-selection' : 'weighted-order/sha256',
+            'level' => 'group',
+            'seed' => $seed,
+            'rules' => $this->rules->toArray(),
+            'weights' => $screened
+                ->mapWithKeys(fn (array $row): array => [$row['group']->id => $row['weight']])
+                ->all(),
+            'groups' => $screened->map(fn (array $row): array => [
+                'group_id' => $row['group']->id,
+                'name' => $row['group']->name,
+                'head_count' => $row['head_count'],
+                'weight' => $row['weight'],
+                'eligible' => $row['eligible'],
+                'reason' => $row['reason'],
+                'won' => in_array($row['group']->id, $winnerIds, true),
+                'blockers' => $row['blockers']->map(fn (DrawEntry $e): array => [
+                    'membership_id' => $e->membershipId,
+                    'name' => $e->name,
+                    'status' => $e->standing->status,
+                    'arrears' => $e->standing->arrears,
+                    'missed_rounds' => $e->standing->missedRounds,
+                    'reason' => $e->reason(),
+                ])->values()->all(),
+            ])->values()->all(),
+        ];
+    }
 
     protected function announceStarted(EqubGroup $parent, int $round, int $membersWon): void
     {

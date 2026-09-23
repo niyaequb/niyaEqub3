@@ -391,6 +391,118 @@ class EqubReports extends Page implements HasForms
             ->get();
     }
 
+    /**
+     * The headline figures, each with the page that takes it apart.
+     *
+     * A number on a card is an answer with no working shown. Every one of
+     * these now links to a page that explains it, and the whole filter set
+     * travels in the URL — so clicking through from a filtered report lands on
+     * the same window and the same Equbs, and the figures on the two screens
+     * agree.
+     *
+     * The order is the order the money moves: what came in, what our share of
+     * it was, what is still owed, then the operational counts.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function cards(): array
+    {
+        $report = $this->report();
+        $summary = $report['summary'];
+        $previous = $report['previous'];
+        $growth = $report['growth'];
+        $profit = $report['profit'];
+        $receivables = $report['receivables'];
+
+        $money = fn ($v): string => number_format((float) $v, 2).' ETB';
+
+        return [
+            [
+                'key' => 'collected',
+                'label' => __('filament.equb_report.collected'),
+                'value' => $money($summary['collected']),
+                'growth' => $growth['collected'],
+                'higher_is_better' => true,
+                'hint' => __('filament.equb_report.vs_previous').': '.$money($previous['collected']),
+                'accent' => 'text-gray-950 dark:text-white',
+                'icon' => 'heroicon-o-arrow-down-tray',
+                'url' => Reports\CollectedReport::getUrl(['f' => $this->filters]),
+            ],
+            [
+                // Ours. Immediately after collected, because the two are
+                // constantly confused and putting them side by side is the
+                // cheapest way to stop that.
+                'key' => 'profit',
+                'label' => __('filament.equb_report.profit'),
+                'value' => $money($profit['fee']),
+                'growth' => null,
+                'higher_is_better' => true,
+                'hint' => __('filament.equb_report.fee_hint', [
+                    'rate' => $profit['rate'],
+                    'members' => number_format($profit['member_share'], 2),
+                ]),
+                'accent' => 'text-success-600 dark:text-success-400',
+                'icon' => 'heroicon-o-receipt-percent',
+                'url' => Reports\ProfitReport::getUrl(['f' => $this->filters]),
+            ],
+            [
+                // Arrears as at the end of the window, from every membership's
+                // schedule — not the sum of pending payment rows, which was
+                // zero on a book full of debt because a member who never paid
+                // creates no rows and the status filter excluded the rest.
+                'key' => 'outstanding',
+                'label' => __('filament.equb_report.outstanding'),
+                'value' => $money($receivables['arrears']),
+                'growth' => null,
+                'higher_is_better' => false,
+                'hint' => trans_choice('filament.equb_report.across_members', $receivables['members_in_arrears'], [
+                    'count' => number_format($receivables['members_in_arrears']),
+                ]).' · '.__('filament.equb_report.never_paid_short', [
+                    'count' => number_format($receivables['never_paid_count']),
+                ]),
+                'accent' => $receivables['arrears'] > 0
+                    ? 'text-danger-600 dark:text-danger-400'
+                    : 'text-success-600 dark:text-success-400',
+                'icon' => 'heroicon-o-exclamation-triangle',
+                'url' => Reports\OutstandingReport::getUrl(['f' => $this->filters]),
+            ],
+            [
+                'key' => 'transactions',
+                'label' => __('filament.equb_report.transactions'),
+                'value' => number_format($summary['transactions']),
+                'growth' => $growth['transactions'],
+                'higher_is_better' => true,
+                'hint' => number_format($summary['paid_count']).' '.__('filament.equb_report.settled')
+                    .' · '.number_format($summary['failed_count']).' '.__('filament.equb_report.failed'),
+                'accent' => 'text-gray-950 dark:text-white',
+                'icon' => 'heroicon-o-list-bullet',
+                'url' => Reports\TransactionsReport::getUrl(['f' => $this->filters]),
+            ],
+            [
+                'key' => 'members',
+                'label' => __('filament.equb_report.paying_members'),
+                'value' => number_format($summary['members']),
+                'growth' => $growth['members'],
+                'higher_is_better' => true,
+                'hint' => number_format($summary['groups']).' '.__('filament.equb_report.active_groups'),
+                'accent' => 'text-gray-950 dark:text-white',
+                'icon' => 'heroicon-o-users',
+                'url' => Reports\PayingMembersReport::getUrl(['f' => $this->filters]),
+            ],
+            [
+                'key' => 'average_payment',
+                'label' => __('filament.equb_report.average_payment'),
+                'value' => $money($summary['average_payment']),
+                'growth' => $growth['average_payment'],
+                'higher_is_better' => true,
+                'hint' => __('filament.equb_report.per_settled_payment'),
+                'accent' => 'text-gray-950 dark:text-white',
+                'icon' => 'heroicon-o-calculator',
+                'url' => Reports\AveragePaymentReport::getUrl(['f' => $this->filters]),
+            ],
+        ];
+    }
+
     // -----------------------------------------------------------------
     // Header actions
     // -----------------------------------------------------------------

@@ -34,6 +34,15 @@ class EqubPayment extends Model
         'bank_payer_account',
         'bank_receipt_url',
         'bank_payload',
+
+        // Reconciliation. Separate from `status` on purpose: status says the
+        // money was credited, these say somebody checked it against the bank.
+        // A row can be paid for months without either being true.
+        'reconciled_at',
+        'reconciled_by',
+        'reconciled_via',
+        'reconcile_note',
+        'reconcile_flag',
     ];
 
     /**
@@ -65,6 +74,7 @@ class EqubPayment extends Model
             'bank_paid_at' => 'datetime',
             'bank_amount' => 'decimal:2',
             'bank_payload' => 'array',
+            'reconciled_at' => 'datetime',
         ];
     }
 
@@ -117,6 +127,25 @@ class EqubPayment extends Model
             ->whereKeyNot($this->getKey());
     }
 
+    /**
+     * Statement lines the bank matched to this contribution.
+     *
+     * Normally none or one. Two is a finding, not a shape to design around:
+     * either the member was charged twice or two credits were matched to the
+     * same row, and both need somebody to look. `whereDoesntHave` on this
+     * relation is how the reconciliation queues find contributions the bank
+     * has no record of.
+     */
+    public function statementLines(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(BankStatementLine::class, 'equb_payment_id');
+    }
+
+    public function reconciledBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'reconciled_by');
+    }
+
     public function isPending(): bool
     {
         return $this->status === EqubPaymentStatus::Pending;
@@ -125,6 +154,42 @@ class EqubPayment extends Model
     public function isPaid(): bool
     {
         return $this->status === EqubPaymentStatus::Paid;
+    }
+
+    /** Checked against the bank, by a rule or by a person. */
+    public function isReconciled(): bool
+    {
+        return $this->reconciled_at !== null;
+    }
+
+    /**
+     * Credited without the bank ever confirming it.
+     *
+     * Not the same as unreconciled. This one is about evidence: `paid` with no
+     * bank_transaction_id means somebody vouched for the money rather than the
+     * bank confirming it, and that distinction is what an auditor is looking
+     * for when they ask how a figure is supported.
+     */
+    public function isUnverified(): bool
+    {
+        return $this->isPaid() && blank($this->bank_transaction_id);
+    }
+
+    /**
+     * How strongly this contribution is supported, worst first.
+     *
+     * Used wherever a payment is shown next to money, so the difference
+     * between "the bank says so" and "an operator said so" is never left to
+     * be inferred from an empty column.
+     */
+    public function evidenceLevel(): string
+    {
+        return match (true) {
+            filled($this->bank_transaction_id) && $this->isReconciled() => 'confirmed',
+            filled($this->bank_transaction_id) => 'bank_confirmed',
+            $this->isReconciled() => 'vouched',
+            default => 'unsupported',
+        };
     }
 
     /**

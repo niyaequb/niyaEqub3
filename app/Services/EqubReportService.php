@@ -171,10 +171,100 @@ class EqubReportService
             'by_group_equb' => $this->breakdownByGroupEqub($f, $start, $end),
             'by_package' => $this->breakdownBy($f, $start, $end, self::PACKAGE_NAME, self::PACKAGE_ID),
             'top_members' => $this->topMembers($f, $start, $end),
+
+            /*
+             * Two figures that are not about this window's payments at all.
+             *
+             * `receivables` is a position, not a flow: what was owed as at the
+             * end of the window, derived from every membership's schedule
+             * rather than from payment rows. It deliberately ignores the
+             * status filter — arrears exist whether or not anyone started a
+             * payment, and the old "outstanding" figure was zero precisely
+             * because it was looking at rows that a default filter had
+             * already excluded.
+             *
+             * `profit` separates our service fee from the members' money.
+             * Everything above this line counts money that passed through us;
+             * only the fee was ever ours.
+             */
+            'receivables' => app(\App\Services\Equb\EqubOutstandingService::class)
+                ->summary($this->receivableFilters($f), $end),
+            'profit' => $this->profitFor($current),
+
             'details' => $f['include_details']
                 ? $this->details($f, $start, $end)
                 : collect(),
         ];
+    }
+
+    /**
+     * The service fee on a window's takings, and what it leaves behind.
+     *
+     * Computed here rather than in the view so the PDF, the till roll, the
+     * CSV and the screen cannot disagree about what the company earned.
+     *
+     * @param  array<string, float|int>  $summary
+     * @return array<string, float>
+     */
+    protected function profitFor(array $summary): array
+    {
+        $rules = app(\App\Services\Equb\EqubRules::class);
+        $collected = (float) ($summary['collected'] ?? 0);
+        $fee = $rules->feeOn($collected);
+
+        return [
+            'rate' => $rules->feePercent(),
+            'fee' => $fee,
+            'member_share' => round($collected - $fee, 2),
+        ];
+    }
+
+    /**
+     * The subset of the report filters that a receivables query understands.
+     *
+     * Payment method and status are dropped on purpose. They describe rows
+     * that exist; arrears are about contributions that do not.
+     *
+     * @param  array<string, mixed>  $f
+     * @return array<string, mixed>
+     */
+    protected function receivableFilters(array $f): array
+    {
+        return [
+            'equb_group_ids' => $f['equb_group_ids'],
+            'equb_package_ids' => $f['equb_package_ids'],
+            'agent_ids' => $f['agent_ids'],
+            'search' => $f['search'],
+        ];
+    }
+
+    /**
+     * The shared join path, for callers outside this class.
+     *
+     * The Profit report needs exactly the same joins and exactly the same
+     * filter semantics as everything above — including the way a parent Equb
+     * filter also matches the family groups playing inside it. Re-deriving
+     * that elsewhere is how two screens start disagreeing about the same
+     * month, so it is lent out rather than copied.
+     *
+     * @param  array<string, mixed>  $filters  Raw filters, as from the page.
+     */
+    public function query(array $filters, ?CarbonImmutable $start = null, ?CarbonImmutable $end = null): QueryBuilder
+    {
+        $f = $this->normalizeFilters($filters);
+
+        return $this->baseQuery($f, $start ?? $f['start'], $end ?? $f['end']);
+    }
+
+    /**
+     * The trend buckets for a window, for callers outside this class.
+     *
+     * @param  array<string, mixed>  $filters
+     * @return array<int, array<string, mixed>>
+     */
+    public function trend(array $filters, CarbonImmutable $start, CarbonImmutable $end, string $granularity): array
+    {
+        return $this->series($this->normalizeFilters($filters), $start, $end, $granularity);
     }
 
     // -----------------------------------------------------------------

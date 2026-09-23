@@ -3,18 +3,45 @@
 namespace App\Services;
 
 use App\Enums\EqubMembershipStatus;
-use App\Enums\EqubPaymentStatus;
 use App\Models\EqubDraw;
 use App\Models\EqubGroup;
 use App\Models\EqubMembership;
+use App\Services\Equb\EqubLotteryEngine;
+use App\Support\Equb\DrawEntry;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
+/**
+ * The single-winner draw.
+ *
+ * HOW THE WINNER IS CHOSEN, AND WHY IT CHANGED
+ *
+ * This used to pick a member at random from everyone active who had made at
+ * least one payment, weighted only by their cohort. That had two problems
+ * worth naming.
+ *
+ * It could hand the pot to somebody two months in arrears. In an Equb the
+ * money being paid out belongs to the other members, so paying a member who
+ * has stopped contributing is taking from the people still paying and giving
+ * it to the person who stopped — the exact failure that ends a circle.
+ *
+ * And it gave the member who paid six rounds up front the same chance as the
+ * one who pays on the last possible day, every round, forever. Nothing
+ * rewarded paying early and nothing cost anything for paying late, so after a
+ * few rounds everybody learns to pay late.
+ *
+ * EqubLotteryEngine now decides both questions — who is in, and what each
+ * entry is worth — and this service's job is reduced to running the round,
+ * recording it and telling people. The engine's reasoning is stored on the
+ * draw so a result can be explained months later.
+ */
 class EqubDrawService
 {
     public function __construct(
         protected SmsService $smsService,
         protected FcmService $fcmService,
+        protected EqubLotteryEngine $engine,
     ) {}
 
 
@@ -86,12 +113,18 @@ class EqubDrawService
             }
         }
 
-        $eligible = $this->getEligibleMemberships($group);
+        $entries = $this->entriesFor($group);
+        $eligible = $entries->filter(fn (DrawEntry $e): bool => $e->eligible);
 
         Log::info("Equb draw diagnostic: Group {$group->id}, Total Members: {$group->current_members_count}, Eligible Members: " . $eligible->count());
 
         if ($eligible->isEmpty()) {
-            return ['success' => false, 'message' => 'No eligible members for draw.'];
+            // Naming the commonest reason turns "no eligible members" from a
+            // dead end into something an operator can act on.
+            return [
+                'success' => false,
+                'message' => $this->emptyPoolMessage($entries),
+            ];
         }
 
         // Get names of all members in this group
@@ -123,15 +156,37 @@ class EqubDrawService
             }
         }
 
-        $winner = $this->pickWeightedWinner($eligible);
+        $seed = $this->engine->seed();
+        $entry = $this->engine->pick($entries, $seed);
+
+        if (! $entry) {
+            return ['success' => false, 'message' => 'No eligible members for draw.'];
+        }
+
+        $winner = EqubMembership::find($entry->membershipId);
+
+        if (! $winner) {
+            return ['success' => false, 'message' => 'The drawn membership no longer exists.'];
+        }
+
+        $snapshot = $this->engine->auditSnapshot($entries, collect([$entry]), $seed);
 
         try {
-            $draw = DB::transaction(function () use ($group, $winner, $executedByAdminId) {
+            $draw = DB::transaction(function () use ($group, $winner, $entry, $entries, $seed, $snapshot, $executedByAdminId) {
                 $draw = EqubDraw::create([
                     'equb_group_id' => $group->id,
                     'draw_date' => now(),
                     'executed_by_admin_id' => $executedByAdminId,
                     'winner_membership_id' => $winner->id,
+                    // Enough to recompute this result from scratch: the seed
+                    // the walk was driven by, and the pool it walked.
+                    'random_seed' => $seed,
+                    'pool_size' => $entries->count(),
+                    'excluded_count' => $entries->filter(fn (DrawEntry $e): bool => $e->ineligible())->count(),
+                    'total_weight' => $snapshot['pool']['total_weight'],
+                    'winner_weight' => $entry->weight,
+                    'winner_odds' => $entry->odds,
+                    'eligibility_snapshot' => $snapshot,
                 ]);
 
                 $winner->update([
@@ -201,9 +256,11 @@ class EqubDrawService
             return ['success' => false, 'message' => "Limit reached for today ({$limit} draws)."];
         }
 
-        $eligible = $this->getEligibleMemberships($group);
+        $entries = $this->entriesFor($group);
+        $eligible = $entries->filter(fn (DrawEntry $e): bool => $e->eligible);
+
         if ($eligible->isEmpty()) {
-            return ['success' => false, 'message' => 'No eligible members for draw.'];
+            return ['success' => false, 'message' => $this->emptyPoolMessage($entries)];
         }
 
         // We only draw as many as we have eligible members, capped by 'remaining'
@@ -238,15 +295,25 @@ class EqubDrawService
             sleep($delay);
         }
 
-        $winners = collect();
-        $tempEligible = clone $eligible;
-        for ($i = 0; $i < $toDrawCount; $i++) {
-            $winner = $this->pickWeightedWinner($tempEligible);
-            if ($winner) {
-                $winners->push($winner);
-                $tempEligible = $tempEligible->reject(fn($m) => $m->id === $winner->id);
-            }
+        // One seed for the whole batch, with the pick index as the nonce. The
+        // round is then a single auditable event rather than three unrelated
+        // ones that happen to have run together.
+        $seed = $this->engine->seed();
+        $drawnEntries = $this->engine->pickMany($entries, $seed, $toDrawCount);
+
+        $winners = $drawnEntries
+            ->map(fn (DrawEntry $e): ?EqubMembership => EqubMembership::find($e->membershipId))
+            ->filter()
+            ->values();
+
+        if ($winners->isEmpty()) {
+            return ['success' => false, 'message' => 'No eligible members for draw.'];
         }
+
+        $snapshot = $this->engine->auditSnapshot($entries, $drawnEntries, $seed);
+        $excluded = $entries->filter(fn (DrawEntry $e): bool => $e->ineligible())->count();
+        $entryByMembership = $drawnEntries->keyBy(fn (DrawEntry $e): int => $e->membershipId);
+
         $draws = [];
         $winnerNames = [];
 
@@ -254,11 +321,20 @@ class EqubDrawService
             DB::beginTransaction();
 
             foreach ($winners as $winner) {
+                $entry = $entryByMembership->get($winner->id);
+
                 $draw = EqubDraw::create([
                     'equb_group_id' => $group->id,
                     'draw_date' => now(),
                     'executed_by_admin_id' => $executedByAdminId,
                     'winner_membership_id' => $winner->id,
+                    'random_seed' => $seed,
+                    'pool_size' => $entries->count(),
+                    'excluded_count' => $excluded,
+                    'total_weight' => $snapshot['pool']['total_weight'],
+                    'winner_weight' => $entry?->weight,
+                    'winner_odds' => $entry?->odds,
+                    'eligibility_snapshot' => $snapshot,
                 ]);
 
                 $winner->update([
@@ -331,17 +407,49 @@ class EqubDrawService
     }
 
     /**
-     * Get memberships eligible for draw: active, has_won=false, and (simplified) at least one paid payment.
+     * Every active place in this Equb, scored.
+     *
+     * Deliberately NOT pre-filtered down to the eligible ones. The screen has
+     * to be able to show who was excluded and why — "no eligible members" on
+     * a group of forty is not something anyone can act on, and the reason is
+     * almost always arrears that nobody has been told about.
+     *
+     * @return Collection<int, DrawEntry>
      */
-    protected function getEligibleMemberships(EqubGroup $group)
+    public function entriesFor(EqubGroup $group): Collection
     {
-        return EqubMembership::query()
-            ->with('cohort')
+        $memberships = EqubMembership::query()
+            ->with(['cohort', 'equbGroup', 'member', 'sponsor'])
             ->where('equb_group_id', $group->id)
             ->where('status', EqubMembershipStatus::Active)
-            ->where('has_won', false)
-            ->whereHas('payments', fn($q) => $q->where('status', EqubPaymentStatus::Paid))
             ->get();
+
+        return $this->engine->entries($memberships);
+    }
+
+    /**
+     * A refusal somebody can do something about.
+     *
+     * @param  Collection<int, DrawEntry>  $entries
+     */
+    protected function emptyPoolMessage(Collection $entries): string
+    {
+        if ($entries->isEmpty()) {
+            return __('filament.lottery.pool_empty');
+        }
+
+        $blocked = $entries->filter(fn (DrawEntry $e): bool => $e->standing->isBlocked())->count();
+        $won = $entries->filter(fn (DrawEntry $e): bool => $e->standing->hasWon)->count();
+
+        if ($blocked > 0) {
+            return __('filament.lottery.pool_all_in_arrears', ['count' => $blocked]);
+        }
+
+        if ($won === $entries->count()) {
+            return __('filament.lottery.pool_all_won');
+        }
+
+        return __('filament.lottery.pool_none_eligible');
     }
 
     protected function sendWinnerNotifications(EqubDraw $draw): void
@@ -362,38 +470,5 @@ class EqubDrawService
         }
 
         // For minimal integration we only do SMS; you can add Notification::send() here.
-    }
-
-    /**
-     * Pick a winner from a collection of memberships using weighted randomness based on cohort weights.
-     */
-    protected function pickWeightedWinner($memberships): ?EqubMembership
-    {
-        if ($memberships->isEmpty()) {
-            return null;
-        }
-
-        // 1. Calculate total weight
-        $totalWeight = $memberships->sum(function ($membership) {
-            return (float) ($membership->cohort->win_weight ?? 1.00);
-        });
-
-        if ($totalWeight <= 0) {
-            return $memberships->random();
-        }
-
-        // 2. Pick a random number
-        $random = mt_rand(0, mt_getrandmax()) / mt_getrandmax() * $totalWeight;
-
-        // 3. Find the membership
-        $currentWeight = 0;
-        foreach ($memberships as $membership) {
-            $currentWeight += (float) ($membership->cohort->win_weight ?? 1.00);
-            if ($random <= $currentWeight) {
-                return $membership;
-            }
-        }
-
-        return $memberships->last();
     }
 }

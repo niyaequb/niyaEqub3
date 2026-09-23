@@ -7,6 +7,7 @@ use App\Enums\EqubPaymentStatus;
 use App\Models\EqubPayment;
 use App\Services\EqubMembershipService;
 use App\Services\SmsService;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -50,6 +51,38 @@ class PaymentSettlementService
      * were never going anywhere.
      */
     protected const ABANDON_AFTER_HOURS = 24;
+
+    /**
+     * The shortest gap between two bank checks that members' reads can cause
+     * for one reference.
+     *
+     * A member coming back from the SuperApp polls every few seconds, and so
+     * may two devices, and so may a tab left open. Without a floor, every one
+     * of those reads is a call into Dashen's API. Fifteen seconds keeps the
+     * member's wait short while capping any single reference at four calls a
+     * minute however hard it is refreshed.
+     */
+    protected const ON_READ_THROTTLE_SECONDS = 15;
+
+    /**
+     * The most distinct bank references a single read may ask about.
+     *
+     * Newest first, so the payment the member has just made is always among
+     * them. Anything beyond this is left to the scheduled sweep, which is what
+     * stops opening one Equb with a long tail of old pending rows turning into
+     * a burst of calls.
+     */
+    protected const ON_READ_MAX_REFERENCES = 3;
+
+    /**
+     * How long one reference is held exclusively while it is being settled.
+     *
+     * Long enough to cover a fabric-token mint and a check-status call at
+     * their full timeouts (20s + 30s) with room to spare. A lock that expires
+     * mid-settlement would let a second worker in; one that outlives a
+     * crashed worker only delays the next check by a minute.
+     */
+    protected const SETTLEMENT_LOCK_SECONDS = 60;
 
     /**
      * Settle every contribution behind one bank transaction.
@@ -102,17 +135,13 @@ class PaymentSettlementService
             'payments' => $payments->pluck('id')->all(),
         ]);
 
-        $verification = $gateway->verifyPayment($reference);
-
-        if (! ($verification['success'] ?? false)) {
-            return $this->handleUnverified($gateway, $payments, $reference, $verification);
-        }
-
-        return $this->markSettled(
-            $payments,
-            $reference,
-            $gateway->extractSettlement((array) ($verification['data'] ?? []))
-        );
+        // From here a notification is handled exactly like any other check:
+        // under the reference's lock, with the rows re-read inside it, asking
+        // the bank to confirm. So a notification can never race the sweep, a
+        // member's read or the operator's button into settling one payment
+        // twice. It waits briefly for a check already under way, because a
+        // notification arrives once and its answer is worth having.
+        return $this->reconcile($gateway, $reference, 10);
     }
 
     /**
@@ -138,7 +167,176 @@ class PaymentSettlementService
      *
      * @return array{success: bool, message: string, payments?: \Illuminate\Support\Collection}
      */
-    public function reconcile(PaymentGateway $gateway, string $reference): array
+    public function reconcile(PaymentGateway $gateway, string $reference, int $waitSeconds = 0): array
+    {
+        // ONE SETTLEMENT PER REFERENCE AT A TIME.
+        //
+        // There are now three ways into this method — the five-minute sweep,
+        // a member's read (verifyPendingAfterResponse) and the operator's
+        // "Check with the bank" button — and nothing stops two of them landing
+        // on the same reference in the same second. Both would read the rows
+        // as pending, both would mark them paid, and the second update would
+        // still count as a status change: a second agent commission and a
+        // second SMS receipt for one payment.
+        //
+        // Non-blocking by default: the sweep and a member's read can simply
+        // move on, because whoever holds the lock will settle the rows and the
+        // next read sees the result. A caller that needs the ANSWER — the
+        // double-charge guard, deciding whether to take a second payment —
+        // passes $waitSeconds and waits its turn instead. `locked` tells it
+        // apart from a real "not paid".
+        $lock = Cache::lock('settlement:'.$reference, static::SETTLEMENT_LOCK_SECONDS);
+
+        try {
+            $acquired = $waitSeconds > 0 ? $lock->block($waitSeconds) : $lock->get();
+        } catch (\Illuminate\Contracts\Cache\LockTimeoutException) {
+            $acquired = false;
+        }
+
+        if (! $acquired) {
+            return [
+                'success' => false,
+                'locked' => true,
+                'message' => 'A check for this payment is already in progress.',
+            ];
+        }
+
+        try {
+            return $this->reconcileLocked($gateway, $reference);
+        } finally {
+            $lock->release();
+        }
+    }
+
+    /**
+     * Ask the bank about a member's recent pending contributions, after the
+     * response to the member has already been sent.
+     *
+     * WHY THIS EXISTS
+     *
+     * Until now the only thing that ever confirmed a payment was the
+     * five-minute sweep. A member who paid, came straight back and opened
+     * their Equb was shown the contribution as not paid — no history entry,
+     * progress at 0%, not eligible for the draw — for up to five minutes, and
+     * indefinitely if the scheduler was not running. Dashen's QA reported
+     * exactly that, from four different angles.
+     *
+     * This closes the window from the member's side: reading a pending
+     * contribution becomes the trigger to ask. The answer lands on the NEXT
+     * read, a few seconds later, which is why the app polls after a payment
+     * rather than reading once.
+     *
+     * WHY AFTER THE RESPONSE
+     *
+     * A check-status call can take up to thirty seconds when the bank is slow,
+     * and the member is looking at a loading screen while it does. Running it
+     * as a terminating callback means the screen answers instantly from what
+     * the database knows now, and the bank is asked once the member already
+     * has that answer. Under PHP-FPM this runs after fastcgi_finish_request(),
+     * so it holds a worker but never the member.
+     *
+     * WHAT KEEPS IT FROM HURTING ANYONE
+     *
+     *   - Only pending, bank-collected rows younger than the abandonment
+     *     window. Nothing paid, nothing failed, nothing offline, nothing old.
+     *   - At most ON_READ_MAX_REFERENCES distinct references per read,
+     *     newest first.
+     *   - At most one check per reference per ON_READ_THROTTLE_SECONDS, taken
+     *     atomically with Cache::add so concurrent reads cannot both win.
+     *   - reconcile() itself holds a per-reference lock, so this can never
+     *     race the sweep into settling a payment twice.
+     *
+     * Never throws. A failure to ask is logged and the row stays pending,
+     * exactly as it would have without this method.
+     *
+     * @param  iterable<int, EqubPayment>  $payments
+     * @return int  How many references were queued for a check.
+     */
+    public function verifyPendingAfterResponse(iterable $payments): int
+    {
+        // Terminating callbacks run AFTER the response only where the SAPI can
+        // finish a request early: PHP-FPM (production here) and LiteSpeed.
+        // Anywhere else — `php artisan serve`, mod_php — they run BEFORE the
+        // response is flushed, and the member's screen would wait on the bank.
+        // There, do nothing: the five-minute sweep still confirms payments,
+        // and a slow read is a worse bug than a slower confirmation.
+        if (! function_exists('fastcgi_finish_request') && ! function_exists('litespeed_finish_request')) {
+            return 0;
+        }
+
+        try {
+            $cutoff = now()->subHours(static::ABANDON_AFTER_HOURS);
+            $gateways = app(PaymentGatewayManager::class);
+
+            $references = collect($payments)
+                ->filter(fn ($payment) => $payment instanceof EqubPayment
+                    && $payment->status === EqubPaymentStatus::Pending
+                    && $payment->payment_method?->isGateway()
+                    && $payment->created_at !== null
+                    && $payment->created_at->gte($cutoff))
+                ->sortByDesc(fn (EqubPayment $payment) => $payment->created_at)
+                ->mapWithKeys(fn (EqubPayment $payment) => [
+                    (string) ($payment->batch_reference ?: $payment->reference) => $payment->payment_method->value,
+                ])
+                ->filter(fn ($slug, $reference) => $reference !== '')
+                ->take(static::ON_READ_MAX_REFERENCES);
+
+            $queued = 0;
+
+            foreach ($references as $reference => $slug) {
+                $gateway = $gateways->tryGet($slug);
+
+                if (! $gateway) {
+                    continue;
+                }
+
+                // Atomic: of any number of simultaneous reads, exactly one
+                // gets to ask the bank about this reference in this window.
+                if (! Cache::add('settlement:on-read:'.$reference, true, static::ON_READ_THROTTLE_SECONDS)) {
+                    continue;
+                }
+
+                app()->terminating(function () use ($gateway, $reference): void {
+                    try {
+                        $result = $this->reconcile($gateway, (string) $reference);
+
+                        Log::info('On-read settlement check', [
+                            'gateway' => $gateway->slug(),
+                            'reference' => $reference,
+                            'success' => $result['success'] ?? false,
+                            'message' => $result['message'] ?? null,
+                        ]);
+                    } catch (\Throwable $e) {
+                        Log::warning('On-read settlement check failed', [
+                            'gateway' => $gateway->slug(),
+                            'reference' => $reference,
+                            'error' => $e->getMessage(),
+                        ]);
+                    }
+                });
+
+                $queued++;
+            }
+
+            return $queued;
+        } catch (\Throwable $e) {
+            // The read that called this must still succeed. A member who
+            // cannot open their Equb because a cache table is missing would be
+            // a far worse bug than the one this method fixes.
+            Log::warning('Could not queue on-read settlement checks', [
+                'error' => $e->getMessage(),
+            ]);
+
+            return 0;
+        }
+    }
+
+    /**
+     * The body of reconcile(), run only while holding the reference's lock.
+     *
+     * @return array{success: bool, message: string, payments?: \Illuminate\Support\Collection}
+     */
+    protected function reconcileLocked(PaymentGateway $gateway, string $reference): array
     {
         $payments = $this->resolve($reference);
 
@@ -257,8 +455,15 @@ class PaymentSettlementService
                 'payments' => $payments->pluck('id')->all(),
             ]);
 
+            // Carried through so a caller can tell "the bank has never heard
+            // of this order" (no money moved) from "the bank did not give a
+            // clear answer" (money may be moving). The double-charge guard
+            // treats those two very differently.
             return [
                 'success' => false,
+                'pending' => true,
+                'not_found' => (bool) ($verification['not_found'] ?? false),
+                'unconfigured' => (bool) ($verification['unconfigured'] ?? false),
                 'message' => 'Settlement could not be verified; contributions left pending.',
             ];
         }

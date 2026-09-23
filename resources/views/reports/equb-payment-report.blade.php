@@ -207,7 +207,14 @@
     @if ($thermal)
         <table class="data-table">
             <tr><td>{{ __('filament.equb_report.collected') }}</td><td class="right bold mono">{{ $money($summary['collected']) }}</td></tr>
-            <tr><td>{{ __('filament.equb_report.outstanding') }}</td><td class="right mono">{{ $money($summary['outstanding']) }}</td></tr>
+            @isset($report['profit'])
+                <tr><td>{{ __('filament.equb_report.members_money') }}</td><td class="right mono">{{ $money($report['profit']['member_share']) }}</td></tr>
+                <tr><td>{{ __('filament.equb_report.service_fee') }} ({{ $report['profit']['rate'] }}%)</td><td class="right mono">{{ $money($report['profit']['fee']) }}</td></tr>
+            @endisset
+            @isset($report['receivables'])
+                <tr><td>{{ __('filament.equb_report.outstanding') }}</td><td class="right mono">{{ $money($report['receivables']['arrears']) }}</td></tr>
+            @endisset
+            <tr><td>{{ __('filament.equb_report.pending') }}</td><td class="right mono">{{ $money($summary['outstanding']) }}</td></tr>
             <tr><td>{{ __('filament.equb_report.transactions') }}</td><td class="right mono">{{ number_format($summary['transactions']) }}</td></tr>
             <tr><td>{{ __('filament.equb_report.paying_members') }}</td><td class="right mono">{{ number_format($summary['members']) }}</td></tr>
             <tr class="total-row"><td>{{ __('filament.equb_report.average_payment') }}</td><td class="right mono">{{ $money($summary['average_payment']) }}</td></tr>
@@ -222,10 +229,35 @@
                         {{ $pct($growth['collected'] ?? null) }} {{ __('filament.equb_report.vs_previous') }}
                     </div>
                 </td>
+                {{-- Our share, printed next to the total it came out of. A
+                     printed "collected" figure read as income overstates the
+                     business by the inverse of the fee rate. --}}
+                @isset($report['profit'])
+                    <td>
+                        <div class="kpi-label">{{ __('filament.equb_report.service_fee') }} ({{ $currency }})</div>
+                        <div class="kpi-value mono">{{ $money($report['profit']['fee']) }}</div>
+                        <div class="kpi-hint">
+                            {{ $report['profit']['rate'] }}% ·
+                            {{ __('filament.equb_report.members_money') }} {{ $money($report['profit']['member_share']) }}
+                        </div>
+                    </td>
+                @endisset
                 <td>
+                    {{-- Arrears from the contribution schedule, as at the end
+                         of this window — not the sum of pending payment rows,
+                         which misses everyone who never started a payment. --}}
                     <div class="kpi-label">{{ __('filament.equb_report.outstanding') }} ({{ $currency }})</div>
-                    <div class="kpi-value mono">{{ $money($summary['outstanding']) }}</div>
-                    <div class="kpi-hint">{{ number_format($summary['pending_count']) }} {{ __('filament.equb_report.pending_payments') }}</div>
+                    <div class="kpi-value mono">
+                        {{ $money($report['receivables']['arrears'] ?? $summary['outstanding']) }}
+                    </div>
+                    <div class="kpi-hint">
+                        @isset($report['receivables'])
+                            {{ number_format($report['receivables']['members_in_arrears']) }} {{ __('filament.equb_report.members') }} ·
+                            {{ number_format($report['receivables']['never_paid_count']) }} {{ __('filament.equb_report.never_paid_label') }}
+                        @else
+                            {{ number_format($summary['pending_count']) }} {{ __('filament.equb_report.pending_payments') }}
+                        @endisset
+                    </div>
                 </td>
                 <td>
                     <div class="kpi-label">{{ __('filament.equb_report.transactions') }}</div>
@@ -339,7 +371,8 @@
                 <tr>
                     <th style="width: 44%;">{{ __('filament.equb_report.equb_group') }}</th>
                     <th class="right">{{ __('filament.equb_report.collected') }}</th>
-                    <th class="right">{{ __('filament.equb_report.outstanding') }}</th>
+                    {{-- Pending payment rows for this row's window, not arrears. --}}
+                    <th class="right">{{ __('filament.equb_report.pending') }}</th>
                     <th class="right">{{ __('filament.equb_report.members') }}</th>
                     <th class="right">{{ __('filament.equb_report.count') }}</th>
                 </tr>
@@ -383,7 +416,8 @@
                     <th style="width: 20%;">{{ __('filament.equb_report.inside_equb') }}</th>
                     <th style="width: 18%;">{{ __('filament.equb_report.created_by') }}</th>
                     <th class="right">{{ __('filament.equb_report.collected') }}</th>
-                    <th class="right">{{ __('filament.equb_report.outstanding') }}</th>
+                    {{-- Pending payment rows for this row's window, not arrears. --}}
+                    <th class="right">{{ __('filament.equb_report.pending') }}</th>
                     <th class="right">{{ __('filament.equb_report.members') }}</th>
                     <th class="right">{{ __('filament.equb_report.count') }}</th>
                 </tr>

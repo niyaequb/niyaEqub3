@@ -830,10 +830,32 @@ abstract class FabricGateway implements PaymentGateway
     // Customer identity
     // ---------------------------------------------------------------------
 
+    /**
+     * The endpoint that turns a customer identifier into who that customer is.
+     *
+     * For Dashen this is getfabrictoken, the same endpoint fabricToken()
+     * already calls before every order: sent a customeridentifier, it answers
+     * with the customer's token AND their profile at data.customer. So when
+     * only {PREFIX}_FABRIC_TOKEN_PATH is configured, that path is used here
+     * too — the mirror of fabricToken(), which falls back the other way.
+     *
+     * Without this, signing in through the SuperApp stayed switched off on any
+     * environment that had set FABRIC_TOKEN_PATH and not TOKEN_PATH, with
+     * nothing in the logs to say so; and signing in through the SuperApp is
+     * what keeps a member signed in when the SuperApp reloads the mini app
+     * after a payment (Dashen QA, item 9).
+     */
+    protected function identityPath(): string
+    {
+        return trim((string) ($this->setting('TOKEN_PATH') ?: $this->setting('FABRIC_TOKEN_PATH')));
+    }
+
     public function exchangeCustomerIdentifier(string $identifier): array
     {
-        if (trim((string) $this->setting('BASE_URL')) === ''
-            || trim((string) $this->setting('TOKEN_PATH')) === '') {
+        $base = trim((string) $this->setting('BASE_URL'));
+        $path = $this->identityPath();
+
+        if ($base === '' || $path === '') {
             return [
                 'success' => false,
                 'message' => $this->displayName().' token endpoint is not configured.',
@@ -845,7 +867,7 @@ abstract class FabricGateway implements PaymentGateway
             $response = Http::withHeaders([
                 'Content-Type' => 'application/json',
                 'x-api-key' => $this->appSecret(),
-            ])->timeout(30)->post($this->endpoint('TOKEN_PATH'), [
+            ])->timeout(30)->post(rtrim($base, '/').'/'.ltrim($path, '/'), [
                 // Field names per Dashen's integration note of 15 Sep 2026.
                 // The previous shape (appid / fabric_app_id / merch_code) was
                 // read off an older sample and is not what this endpoint takes.
@@ -912,7 +934,7 @@ abstract class FabricGateway implements PaymentGateway
             // who the customer is. Public by design.
             'app_code' => $this->miniAppCode(),
             'stage' => $this->stage(),
-            'supports_identity' => trim((string) $this->setting('TOKEN_PATH')) !== '',
+            'supports_identity' => $this->identityPath() !== '',
         ];
     }
 }

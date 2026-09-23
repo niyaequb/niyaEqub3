@@ -88,68 +88,63 @@
 
         {{-- ============================================================ --}}
         {{-- Headline figures                                             --}}
+        {{--                                                              --}}
+        {{-- Every card is a link now. A figure with no way to open it is --}}
+        {{-- an assertion; the page behind each one shows the working and --}}
+        {{-- carries these same filters through, so the two always agree. --}}
         {{-- ============================================================ --}}
-        @php
-            $cards = [
-                [
-                    'label' => __('filament.equb_report.collected'),
-                    'value' => $money($summary['collected']) . ' ETB',
-                    'trend' => $trend($growth['collected']),
-                    'hint' => __('filament.equb_report.vs_previous') . ': ' . $money($previous['collected']) . ' ETB',
-                    'accent' => 'text-success-600 dark:text-success-400',
-                ],
-                [
-                    'label' => __('filament.equb_report.outstanding'),
-                    'value' => $money($summary['outstanding']) . ' ETB',
-                    // Rising unpaid balances are bad news, so the arrow colour flips.
-                    'trend' => $trend($growth['outstanding'], higherIsBetter: false),
-                    'hint' => number_format($summary['pending_count']) . ' ' . __('filament.equb_report.pending_payments'),
-                    'accent' => 'text-warning-600 dark:text-warning-400',
-                ],
-                [
-                    'label' => __('filament.equb_report.transactions'),
-                    'value' => number_format($summary['transactions']),
-                    'trend' => $trend($growth['transactions']),
-                    'hint' => number_format($summary['paid_count']) . ' ' . __('filament.equb_report.settled')
-                        . ' · ' . number_format($summary['failed_count']) . ' ' . __('filament.equb_report.failed'),
-                    'accent' => 'text-gray-950 dark:text-white',
-                ],
-                [
-                    'label' => __('filament.equb_report.paying_members'),
-                    'value' => number_format($summary['members']),
-                    'trend' => $trend($growth['members']),
-                    'hint' => number_format($summary['groups']) . ' ' . __('filament.equb_report.active_groups'),
-                    'accent' => 'text-gray-950 dark:text-white',
-                ],
-                [
-                    'label' => __('filament.equb_report.average_payment'),
-                    'value' => $money($summary['average_payment']) . ' ETB',
-                    'trend' => $trend($growth['average_payment']),
-                    'hint' => __('filament.equb_report.per_settled_payment'),
-                    'accent' => 'text-gray-950 dark:text-white',
-                ],
-            ];
-        @endphp
+        @php $cards = $this->cards(); @endphp
 
-        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             @foreach ($cards as $card)
-                <x-filament::section class="!p-0">
+                <a
+                    href="{{ $card['url'] }}"
+                    wire:navigate
+                    class="group block rounded-xl bg-white shadow-sm ring-1 ring-gray-950/5 transition hover:shadow-md hover:ring-primary-500/40 dark:bg-gray-900 dark:ring-white/10 dark:hover:ring-primary-400/40"
+                >
                     <div class="p-4">
-                        <p class="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                            {{ $card['label'] }}
-                        </p>
-                        <p class="mt-1 text-xl font-semibold tracking-tight tabular-nums {{ $card['accent'] }}">
+                        <div class="flex items-start justify-between gap-2">
+                            <p class="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                                {{ $card['label'] }}
+                            </p>
+                            <x-filament::icon
+                                :icon="$card['icon']"
+                                class="h-4 w-4 text-gray-300 transition group-hover:text-primary-500 dark:text-gray-600 dark:group-hover:text-primary-400"
+                            />
+                        </div>
+
+                        <p class="mt-1.5 text-2xl font-semibold tracking-tight tabular-nums {{ $card['accent'] }}">
                             {{ $card['value'] }}
                         </p>
-                        <p class="mt-1 flex items-center gap-1 text-xs font-medium {{ $card['trend']['class'] }}">
-                            <x-filament::icon :icon="$card['trend']['icon']" class="h-3.5 w-3.5" />
-                            {{ $card['trend']['label'] }}
-                        </p>
+
+                        @php $t = $trend($card['growth'], higherIsBetter: $card['higher_is_better']); @endphp
+                        @if ($card['growth'] !== null)
+                            <p class="mt-1 flex items-center gap-1 text-xs font-medium {{ $t['class'] }}">
+                                <x-filament::icon :icon="$t['icon']" class="h-3.5 w-3.5" />
+                                {{ $t['label'] }}
+                            </p>
+                        @endif
+
                         <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ $card['hint'] }}</p>
+
+                        <p class="mt-2.5 inline-flex items-center gap-1 text-xs font-medium text-gray-400 transition group-hover:text-primary-600 dark:text-gray-500 dark:group-hover:text-primary-400">
+                            {{ __('filament.equb_report.open_details') }}
+                            <x-filament::icon icon="heroicon-m-arrow-right" class="h-3.5 w-3.5" />
+                        </p>
                     </div>
-                </x-filament::section>
+                </a>
             @endforeach
         </div>
+
+        {{-- The one sentence that keeps every figure above honest: almost all
+             of the money on this page belongs to the members, not to us. --}}
+        <p class="text-xs text-gray-500 dark:text-gray-400">
+            {{ __('filament.equb_report.money_note', [
+                'rate' => $report['profit']['rate'],
+                'fee' => $money($report['profit']['fee']),
+                'members' => $money($report['profit']['member_share']),
+            ]) }}
+        </p>
 
         {{-- Active filter summary, so the numbers above are never ambiguous. --}}
         @if ($meta['has_filters'])
@@ -205,7 +200,9 @@
                             <tr>
                                 <th class="py-2 pr-3 font-medium">{{ __('filament.equb_report.equb_group') }}</th>
                                 <th class="py-2 pr-3 text-right font-medium">{{ __('filament.equb_report.collected') }}</th>
-                                <th class="py-2 text-right font-medium">{{ __('filament.equb_report.outstanding') }}</th>
+                                {{-- Pending payment rows, not arrears. Real receivables are
+                                     schedule-derived and live on the Outstanding page. --}}
+                                <th class="py-2 text-right font-medium">{{ __('filament.equb_report.pending') }}</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
@@ -244,7 +241,9 @@
                             <tr>
                                 <th class="py-2 pr-3 font-medium">{{ __('filament.equb_report.group_equb') }}</th>
                                 <th class="py-2 pr-3 text-right font-medium">{{ __('filament.equb_report.collected') }}</th>
-                                <th class="py-2 text-right font-medium">{{ __('filament.equb_report.outstanding') }}</th>
+                                {{-- Pending payment rows, not arrears. Real receivables are
+                                     schedule-derived and live on the Outstanding page. --}}
+                                <th class="py-2 text-right font-medium">{{ __('filament.equb_report.pending') }}</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-gray-100 dark:divide-gray-800">

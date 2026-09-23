@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\PrintStation;
 use App\Models\ReportPrintJob;
 use App\Models\ReportPrintSchedule;
 use Illuminate\Support\Carbon;
@@ -71,7 +72,29 @@ class ReportPrintService
         protected EqubReportService $reports,
         protected ReportRenderService $renderer,
         protected PrinterService $printer,
+        protected SettingsService $settings,
     ) {}
+
+    /**
+     * The master switch, read straight from settings.
+     *
+     * PrintAgentService owns this control, but this class must not depend on
+     * it: PrintAgentService is constructed with a ReportPrintService, and a
+     * constructor pointing back would be a cycle the container cannot resolve.
+     * Reading the one setting directly is cheaper than the indirection anyway.
+     */
+    public function printingEnabled(): bool
+    {
+        $value = $this->settings->get('printing.enabled');
+
+        // Never configured means on. A system nobody has switched on yet
+        // should print, not wait silently to be discovered.
+        if ($value === null || $value === '') {
+            return true;
+        }
+
+        return filter_var($value, FILTER_VALIDATE_BOOLEAN);
+    }
 
     /**
      * Build a report, render it, and put it in the print queue.
@@ -86,6 +109,18 @@ class ReportPrintService
         $format = $options['format'] ?? 'pdf';
         $paper = $this->renderer->normalizePaper($options['paper'] ?? 'a4');
         $delivery = $options['delivery'] ?? 'agent';
+
+        // A job bound to a desk takes that desk's paper.
+        //
+        // The station knows what is loaded in it and the schedule does not, so
+        // when the two disagree the station wins. Without this, binding a
+        // schedule to the counter's 80mm receipt printer still renders A4 and
+        // the roll comes out as three inches of a forty-column table.
+        $targetStation = $this->resolveStation($options['target_station_id'] ?? null);
+
+        if ($targetStation && $targetStation->paper !== $paper) {
+            $paper = $this->renderer->normalizePaper($targetStation->paper);
+        }
 
         // A thermal roll cannot render an A4 layout, and an office laser
         // cannot interpret ESC/POS. Rather than let a mismatched pair fail at
@@ -130,7 +165,10 @@ class ReportPrintService
 
         return ReportPrintJob::create([
             'report_print_schedule_id' => $options['schedule_id'] ?? null,
+            'target_station_id' => $targetStation?->getKey(),
             'source' => $options['source'] ?? 'manual',
+            'priority' => (int) ($options['priority'] ?? ReportPrintJob::PRIORITY_NORMAL),
+            'max_attempts' => max(1, (int) ($options['max_attempts'] ?? config('printing.agent.max_attempts', 3))),
             'status' => ReportPrintJob::STATUS_QUEUED,
             'title' => $options['title'] ?? ($report['meta']['period_label'].' — '.$report['meta']['range_label']),
             'period' => $report['meta']['period'],
@@ -197,13 +235,28 @@ class ReportPrintService
      *
      * @return array{ok: bool, message: string, job?: ReportPrintJob}
      */
-    public function runSchedule(ReportPrintSchedule $schedule): array
+    public function runSchedule(ReportPrintSchedule $schedule, bool $force = false): array
     {
+        // The master switch stops work being made, not just work being
+        // delivered. Rendering a report at 08:00 that nobody will print only
+        // fills the disk with documents holding member data.
+        //
+        // The slot is still consumed — next_run_at advances — so that turning
+        // printing back on after a fortnight does not release a fortnight of
+        // backdated reports at once. $force is the "Run now" button, which is a
+        // person asking explicitly and outranks the switch.
+        if (! $force && ! $this->printingEnabled()) {
+            $schedule->markRun('skipped', __('filament.print_agent.skipped_master_off'));
+
+            return ['ok' => true, 'message' => __('filament.print_agent.skipped_master_off')];
+        }
+
         try {
             $filters = $this->resolveScheduleFilters($schedule);
 
             $job = $this->queue($filters, [
                 'schedule_id' => $schedule->id,
+                'target_station_id' => $schedule->target_station_id,
                 'source' => 'schedule',
                 'format' => $schedule->format,
                 'paper' => $schedule->paper,
@@ -235,7 +288,11 @@ class ReportPrintService
 
             return [
                 'ok' => true,
-                'message' => __('filament.equb_report.queued_for_agent'),
+                'message' => $schedule->target_station_id
+                    ? __('filament.print_agent.queued_for_station', [
+                        'station' => $schedule->targetStation?->name ?? '—',
+                    ])
+                    : __('filament.equb_report.queued_for_agent'),
                 'job' => $job,
             ];
         } catch (\Throwable $e) {
@@ -339,17 +396,36 @@ class ReportPrintService
     /**
      * Jobs stuck in "printing" — an agent claimed them and then the tab was
      * closed. Put them back so the next agent picks them up.
+     *
+     * The logic moved to PrintAgentService, which can see station heartbeats
+     * and so can tell a busy agent from a dead one instead of waiting out a
+     * flat fifteen minutes. Resolved here rather than injected: that class is
+     * constructed with this one, and a constructor pointing back would be a
+     * cycle.
      */
-    public function releaseStaleClaims(int $minutes = 15): int
+    public function releaseStaleClaims(): int
     {
-        return ReportPrintJob::query()
-            ->where('status', ReportPrintJob::STATUS_PRINTING)
-            ->where('claimed_at', '<', Carbon::now()->subMinutes($minutes))
-            ->where('attempts', '<', 3)
-            ->update([
-                'status' => ReportPrintJob::STATUS_QUEUED,
-                'claimed_at' => null,
-                'claimed_by' => null,
-            ]);
+        return app(\App\Services\Printing\PrintAgentService::class)->releaseStaleClaims();
+    }
+
+    /**
+     * Turn whatever we were handed into a station, or nothing.
+     *
+     * A schedule can outlive the desk it was bound to — a branch closes, the PC
+     * is retired — and when that happens the report should still be printed by
+     * somebody rather than addressed to a station that no longer exists and
+     * waiting forever. A missing station therefore silently becomes "anywhere".
+     */
+    protected function resolveStation(mixed $station): ?PrintStation
+    {
+        if ($station instanceof PrintStation) {
+            return $station;
+        }
+
+        if (blank($station)) {
+            return null;
+        }
+
+        return PrintStation::find($station);
     }
 }

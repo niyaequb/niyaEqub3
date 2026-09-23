@@ -20,7 +20,8 @@ class RunScheduledReportPrints extends Command
     protected $signature = 'reports:run-scheduled-prints
                             {--schedule= : Run one schedule by ID, ignoring its timing}
                             {--dry-run : Report what would run without printing}
-                            {--prune=60 : Delete finished print jobs older than this many days}';
+                            {--force : Run even when printing is switched off}
+                            {--prune= : Delete finished print jobs older than this many days}';
 
     protected $description = 'Build and dispatch any Equb payment reports whose print schedule is due';
 
@@ -36,6 +37,19 @@ class RunScheduledReportPrints extends Command
         // server without waiting for its next slot.
         if ($id = $this->option('schedule')) {
             return $this->runOne((int) $id, $printer);
+        }
+
+        // The master switch. Housekeeping below still runs — stale claims and
+        // old files do not stop existing because printing is paused — but
+        // nothing new is rendered. runSchedule() enforces this too; checking
+        // here as well keeps the console output honest about why a due
+        // schedule produced nothing.
+        if (! $this->option('force') && ! $printer->printingEnabled()) {
+            $this->components->warn('Printing is switched off. No reports will be rendered.');
+
+            $this->housekeeping($printer);
+
+            return Command::SUCCESS;
         }
 
         $due = ReportPrintSchedule::query()
@@ -82,27 +96,42 @@ class RunScheduledReportPrints extends Command
             ]);
         }
 
-        // Housekeeping runs on the same tick so it needs no second schedule
-        // entry, and stale claims get released even when no agent is running.
+        $this->housekeeping($printer);
+
+        return $failed > 0 ? Command::FAILURE : Command::SUCCESS;
+    }
+
+    /**
+     * Runs on the same tick so it needs no second schedule entry.
+     *
+     * Stale claims are released even when no agent is running — the whole
+     * point is to recover jobs held by an agent that has stopped.
+     */
+    protected function housekeeping(ReportPrintService $printer): void
+    {
         $released = $printer->releaseStaleClaims();
 
         if ($released > 0) {
             $this->components->info("Released {$released} stale print claim(s).");
         }
 
-        if (($days = (int) $this->option('prune')) > 0) {
-            // Only once an hour: pruning on every minute would scan the jobs
-            // table 1,440 times a day to delete the same nothing.
-            if ((int) now()->minute === 5) {
-                $deleted = $printer->prune($days);
+        $days = (int) ($this->option('prune') ?? config('printing.agent.prune_after_days', 60));
 
-                if ($deleted > 0) {
-                    $this->components->info("Pruned {$deleted} finished print job(s) older than {$days} days.");
-                }
-            }
+        if ($days <= 0) {
+            return;
         }
 
-        return $failed > 0 ? Command::FAILURE : Command::SUCCESS;
+        // Only once an hour: pruning every minute would scan the jobs table
+        // 1,440 times a day to delete the same nothing.
+        if ((int) now()->minute !== 5) {
+            return;
+        }
+
+        $deleted = $printer->prune($days);
+
+        if ($deleted > 0) {
+            $this->components->info("Pruned {$deleted} finished print job(s) older than {$days} days.");
+        }
     }
 
     protected function runOne(int $id, ReportPrintService $printer): int
@@ -127,7 +156,9 @@ class RunScheduledReportPrints extends Command
             return Command::SUCCESS;
         }
 
-        $result = $printer->runSchedule($schedule);
+        // --schedule is somebody asking for this one report by hand, which
+        // outranks the master switch the same way the "Run now" button does.
+        $result = $printer->runSchedule($schedule, force: true);
 
         $result['ok']
             ? $this->components->info($result['message'])

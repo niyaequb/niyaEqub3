@@ -66,7 +66,27 @@ class EqubPaymentController extends Controller
             $query->where('status', $request->input('status'));
         }
 
-        $payments = $query->latest('payment_date')->paginate($request->input('per_page', 15));
+        // "What did I just try to pay?"
+        //
+        // Asked by the mini app when it starts up signed in through the
+        // SuperApp rather than from its own storage — the case where the
+        // SuperApp's reload after a payment wiped that storage, and with it
+        // the app's note of which Equb the member was paying from. The server
+        // still knows, so the app can reopen that Equb and carry on confirming
+        // the payment (Dashen QA, item 9). Newest attempt first; the window is
+        // capped so this can never be used to page through history by age.
+        $recentMinutes = $request->filled('recent_minutes')
+            ? max(1, min(60, (int) $request->input('recent_minutes')))
+            : null;
+
+        if ($recentMinutes !== null) {
+            $query->where('created_at', '>=', now()->subMinutes($recentMinutes));
+        }
+
+        $payments = ($recentMinutes !== null
+            ? $query->latest('created_at')
+            : $query->latest('payment_date')
+        )->paginate($request->input('per_page', 15));
 
         return response()->json([
             'status' => 'success',
@@ -97,6 +117,12 @@ class EqubPaymentController extends Controller
         }
 
         $equbPayment->load(['membership.member.user', 'membership.sponsor.user', 'membership.equbGroup.package']);
+
+        // The class docblock tells clients to poll this to confirm settlement,
+        // and until now polling it confirmed nothing: it only re-read the row.
+        // A pending contribution is now checked with the bank once this
+        // response has gone, so the next poll carries the bank's answer.
+        app(PaymentSettlementService::class)->verifyPendingAfterResponse([$equbPayment]);
 
         return response()->json([
             'status' => 'success',
@@ -162,6 +188,16 @@ class EqubPaymentController extends Controller
                 $signature,
                 $request->getContent(),
             );
+
+            // Another check held this payment for longer than the
+            // notification waited, so it was never processed. 503 asks the
+            // bank to deliver it again rather than treating it as done.
+            if ($result['locked'] ?? false) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => $result['message'] ?? 'Busy, please retry.',
+                ], 503);
+            }
 
             // 200 even when the charge itself failed: the notification was
             // handled correctly, and a non-200 tells the bank to retry a
@@ -235,6 +271,13 @@ class EqubPaymentController extends Controller
                 ], 422);
             }
 
+            // ONE PAYMENT PER ROUND. See roundStatus().
+            $round = $this->roundStatus(collect([$membership]), $paymentDate);
+
+            if ($round !== 'clear') {
+                return $this->roundBlocked($round, false);
+            }
+
             $payment = EqubPayment::create([
                 'equb_membership_id' => $membership->id,
                 'amount' => $due,
@@ -289,6 +332,153 @@ class EqubPaymentController extends Controller
             'status' => 'error',
             'message' => 'That payment method is no longer available.',
         ], 422);
+    }
+
+    /**
+     * Can this round be charged, for these places?
+     *
+     * WHY THIS EXISTS
+     *
+     * Nothing used to stop a second charge for a round that was already paid.
+     * While settlement lagged behind the member, a round they had just paid
+     * went on showing as unpaid, and paying it again debited them twice: the
+     * transaction dispute Dashen Bank raised as a go-live risk.
+     *
+     * THE THREE ANSWERS
+     *
+     *   'paid'      A contribution for this round is already settled. Refuse.
+     *
+     *   'in_doubt'  An earlier attempt may still be moving money: the bank
+     *               knows the order but has not called it either way, the
+     *               bank could not be reached, or another worker is checking
+     *               it right now. Refuse for now — the member is told to wait
+     *               a moment — because charging again here is exactly how a
+     *               double debit happens. Only for attempts younger than the
+     *               order's own 120-minute expiry; past that the bank cannot
+     *               take the money any more.
+     *
+     *   'clear'     Nothing paid, and every earlier attempt is either unknown
+     *               to the bank (no money moved) or declined. A cancelled
+     *               attempt must not lock the member out, so this proceeds.
+     *
+     * COST
+     *
+     * An ordinary first payment is one indexed query. The bank is asked only
+     * when there is an earlier pending attempt for the same round — the
+     * double-payment case — and then about each distinct attempt ONCE, however
+     * many places a batch covers, newest first and at most two.
+     *
+     * @param  \Illuminate\Support\Collection<int, EqubMembership>  $memberships
+     * @return 'paid'|'in_doubt'|'clear'
+     */
+    protected function roundStatus($memberships, ?string $paymentDate): string
+    {
+        if (blank($paymentDate) || $memberships->isEmpty()) {
+            return 'clear';
+        }
+
+        try {
+            $day = \Illuminate\Support\Carbon::parse($paymentDate)->toDateString();
+        } catch (\Throwable) {
+            return 'clear';
+        }
+
+        $ids = $memberships->pluck('id')->all();
+
+        $forRound = fn () => EqubPayment::query()
+            ->whereIn('equb_membership_id', $ids)
+            ->whereDate('payment_date', $day);
+
+        if ($forRound()->where('status', EqubPaymentStatus::Paid)->exists()) {
+            return 'paid';
+        }
+
+        // Distinct bank orders, newest first. A batch is one order however
+        // many places it covered, so it is asked about once.
+        $attempts = $forRound()
+            ->where('status', EqubPaymentStatus::Pending)
+            ->where('created_at', '>=', now()->subDay())
+            ->latest()
+            ->get()
+            ->groupBy(fn (EqubPayment $p) => (string) ($p->batch_reference ?: $p->reference))
+            ->filter(fn ($rows, $reference) => $reference !== '')
+            ->take(2);
+
+        if ($attempts->isEmpty()) {
+            return 'clear';
+        }
+
+        $gateways = app(PaymentGatewayManager::class);
+        $settlement = app(PaymentSettlementService::class);
+        $inDoubt = false;
+
+        foreach ($attempts as $reference => $rows) {
+            // Past the order's own expiry the bank can no longer take this
+            // money, whatever else is true of it.
+            $live = $rows->contains(fn (EqubPayment $p) => $p->created_at?->gte(now()->subMinutes(120)));
+
+            $gateway = $gateways->tryGet((string) $rows->first()->payment_method?->value);
+
+            if (! $gateway) {
+                $inDoubt = $inDoubt || $live;
+
+                continue;
+            }
+
+            try {
+                // Waits for a check already under way rather than reading its
+                // lock as "not paid", which is the gap a second charge would
+                // otherwise slip through.
+                $result = $settlement->reconcile($gateway, (string) $reference, 12);
+            } catch (\Throwable $e) {
+                Log::warning('Could not check an earlier attempt before a new payment', [
+                    'reference' => $reference,
+                    'error' => $e->getMessage(),
+                ]);
+                $inDoubt = $inDoubt || $live;
+
+                continue;
+            }
+
+            if ($result['success'] ?? false) {
+                continue; // settled just now; the query below sees it
+            }
+
+            // "Unconfigured" is not doubt about THIS payment: this server
+            // simply cannot ask the bank anything. Treating it as doubt would
+            // refuse every retry after a cancelled attempt, for two hours,
+            // with nothing able to clear it.
+            $unclear = ($result['locked'] ?? false)
+                || (($result['pending'] ?? false)
+                    && ! ($result['not_found'] ?? false)
+                    && ! ($result['unconfigured'] ?? false));
+
+            $inDoubt = $inDoubt || ($unclear && $live);
+        }
+
+        if ($forRound()->where('status', EqubPaymentStatus::Paid)->exists()) {
+            return 'paid';
+        }
+
+        return $inDoubt ? 'in_doubt' : 'clear';
+    }
+
+    /**
+     * The refusal for a round that cannot be charged right now.
+     */
+    protected function roundBlocked(string $round, bool $batch): JsonResponse
+    {
+        $message = $round === 'paid'
+            ? ($batch
+                ? 'One or more of these contributions has already been paid. Refresh and try again.'
+                : 'This contribution has already been paid.')
+            : 'Your last payment for this date is still being confirmed by the bank. Please wait a minute and check again before paying.';
+
+        return response()->json([
+            'status' => 'error',
+            'code' => $round === 'paid' ? 'already_paid' : 'payment_in_progress',
+            'message' => $message,
+        ], 409);
     }
 
     /**
@@ -415,6 +605,16 @@ class EqubPaymentController extends Controller
                 'status' => 'error',
                 'message' => 'That bank is not available for payments right now.',
             ], 422);
+        }
+
+        // ONE PAYMENT PER ROUND, for every place in the batch. All or nothing,
+        // like the ownership check above: quietly dropping a place that is
+        // already paid would charge a different total from the one the member
+        // confirmed.
+        $round = $this->roundStatus($memberships, $data['payment_date']);
+
+        if ($round !== 'clear') {
+            return $this->roundBlocked($round, true);
         }
 
         $batchReference = 'EQUB-B'.strtoupper(Str::random(10));

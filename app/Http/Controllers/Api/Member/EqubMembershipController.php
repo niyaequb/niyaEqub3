@@ -8,6 +8,7 @@ use App\Http\Resources\Api\EqubMembershipResource;
 use App\Models\EqubMembership;
 use App\Services\EqubMembershipService;
 use App\Services\FcmService;
+use App\Services\Payments\PaymentSettlementService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -55,6 +56,14 @@ class EqubMembershipController extends Controller
         }
 
         $memberships = $query->latest('join_date')->paginate($request->input('per_page', 15));
+
+        // The Payments screen reads this. Contributions still waiting on the
+        // bank are checked after the response, so the next visit shows them
+        // settled instead of as past due. See
+        // PaymentSettlementService::verifyPendingAfterResponse().
+        app(PaymentSettlementService::class)->verifyPendingAfterResponse(
+            collect($memberships->items())->flatMap(fn ($membership) => $membership->payments)
+        );
 
         return response()->json([
             'status' => 'success',

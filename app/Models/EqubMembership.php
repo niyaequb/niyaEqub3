@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\Log;
 
 class EqubMembership extends Model
 {
-    protected $fillable = ['equb_group_id', 'member_id', 'role', 'invited_by_member_id', 'cohort_id', 'contribution_amount', 'contribution_frequency_days', 'join_date', 'calculated_end_date', 'draw_position', 'has_won', 'win_date', 'status', 'last_overdue_notified_at', 'sponsor_member_id', 'responsibility_name', 'responsibility_phone', 'responsibility_relation', 'responsibility_note'];
+    protected $fillable = ['equb_group_id', 'member_id', 'role', 'invited_by_member_id', 'cohort_id', 'contribution_amount', 'contribution_frequency_days', 'join_date', 'calculated_end_date', 'draw_position', 'has_won', 'win_date', 'status', 'last_overdue_notified_at', 'sponsor_member_id', 'responsibility_name', 'responsibility_phone', 'responsibility_relation', 'responsibility_note', 'draw_blocked_until', 'draw_block_reason', 'fraud_flagged_at'];
 
     protected function casts(): array
     {
@@ -23,6 +23,11 @@ class EqubMembership extends Model
             'status' => EqubMembershipStatus::class,
             'role' => \App\Enums\EqubMembershipRole::class,
             'last_overdue_notified_at' => 'datetime',
+            // A hand-applied hold on this place in the draw. Separate from
+            // arrears, which the schedule decides on its own and which clears
+            // itself the moment the member catches up.
+            'draw_blocked_until' => 'datetime',
+            'fraud_flagged_at' => 'datetime',
         ];
     }
 
@@ -83,6 +88,26 @@ class EqubMembership extends Model
     public function isEligibleForDraw(): bool
     {
         return $this->status === EqubMembershipStatus::Active && !$this->has_won;
+    }
+
+    /**
+     * Where this membership stands against its own schedule: what is owed,
+     * what was paid early, whether it has ever been late.
+     *
+     * Delegated rather than computed here, because the same arithmetic backs
+     * the lottery, the receivables report and this accessor, and three copies
+     * of it would drift. Not memoised on the model — a standing read after a
+     * payment lands must reflect that payment.
+     */
+    public function standing(): \App\Support\Equb\MembershipStanding
+    {
+        return app(\App\Services\Equb\EqubStandingService::class)->for($this);
+    }
+
+    /** An operator has taken this place out of the draw, and the hold still holds. */
+    public function isDrawBlockedByAdmin(): bool
+    {
+        return $this->draw_blocked_until !== null && $this->draw_blocked_until->isFuture();
     }
 
     // ------------------------------------------------------------------
