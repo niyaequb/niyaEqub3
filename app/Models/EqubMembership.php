@@ -352,10 +352,17 @@ class EqubMembership extends Model
     }
 
     /**
-     * Get the next draw date (first pending round in the schedule).
-     */
-    /**
-     * Get the next draw date (first pending round in the schedule).
+     * The next draw this member can still wait for: the first round on their
+     * schedule that is today or later.
+     *
+     * Today counts until today's draw has run. A date that has gone by is
+     * never returned. This used to pick the round NEAREST to today in either
+     * direction, so the day after a draw the app announced "Next draw" for
+     * yesterday, and once the last round was behind it, for that one forever.
+     * A round in the past has either been drawn or is overdue; neither is a
+     * draw anybody can wait for.
+     *
+     * Null when no round is left, and the app then shows no next draw.
      */
     public function getNextDrawDateAttribute(): ?\Carbon\Carbon
     {
@@ -366,34 +373,30 @@ class EqubMembership extends Model
         }
 
         $today = now()->startOfDay();
-        $nearestDate = null;
-        $smallestDiff = null;
+        $drawnToday = null;
 
-        $todayDraw = $this->equbGroup->draws()->whereDate('draw_date', $today)->first();
+        $dates = collect($schedule)
+            ->map(fn (array $round) => \Carbon\Carbon::parse($round['expected_date'])->startOfDay())
+            ->sort()
+            ->values();
 
-        foreach ($schedule as $payment) {
-            $expectedDate = \Carbon\Carbon::parse($payment['expected_date'])->startOfDay();
+        foreach ($dates as $date) {
+            if ($date->lt($today)) {
+                continue;
+            }
 
-            // Check if this payment date is today
-            if ($expectedDate->isSameDay($today)) {
-                // If there's a draw today, skip this date (draw already done)
-                if ($todayDraw) {
+            if ($date->isSameDay($today)) {
+                // Asked only when a round actually falls today.
+                $drawnToday ??= $this->equbGroup?->draws()->whereDate('draw_date', $today)->exists() ?? false;
+
+                if ($drawnToday) {
                     continue;
-                } else {
-                    // No draw today, so today is the next draw date
-                    return $today;
                 }
             }
 
-            // Calculate absolute difference for all dates
-            $diffInDays = abs($expectedDate->diffInDays($today));
-
-            if ($smallestDiff === null || $diffInDays < $smallestDiff) {
-                $smallestDiff = $diffInDays;
-                $nearestDate = $expectedDate;
-            }
+            return $date;
         }
 
-        return $nearestDate;
+        return null;
     }
 }
