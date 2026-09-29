@@ -40,16 +40,20 @@ use Illuminate\Support\Str;
 class EqubPaymentController extends Controller
 {
     /**
-     * How long a Dashen order can still be paid: timeout_express, 120m. An
-     * earlier attempt older than this cannot move money any more.
+     * The longest an earlier attempt can ever hold up a new payment: the
+     * order lifetime the bank was given before it became a setting
+     * (timeout_express, 120m). See orderLifetimeSeconds().
      */
-    private const ORDER_LIFETIME_SECONDS = 120 * 60;
+    private const MAX_ORDER_LIFETIME_SECONDS = 120 * 60;
 
     /**
-     * Roughly how many seconds a refused retry has to wait, when that is
-     * known. Set by roundStatus() for roundBlocked().
+     * Roughly how many seconds a refused retry has to wait, and whether that
+     * is because the bank said "not paid" (false) or because nothing is known
+     * yet (true). Set by roundStatus() for roundBlocked().
      */
     private ?int $retryAfter = null;
+
+    private bool $retryUnknown = false;
 
     /**
      * List payments for current user's memberships.
@@ -366,8 +370,8 @@ class EqubPaymentController extends Controller
      *               it right now. Refuse for now — the member is told to wait
      *               a moment — because charging again here is exactly how a
      *               double debit happens. Only for attempts younger than the
-     *               order's own 120-minute expiry; past that the bank cannot
-     *               take the money any more.
+     *               order's own expiry (Order Timeout, at most 120 minutes);
+     *               past that the bank cannot take the money any more.
      *
      *   'clear'     Nothing paid, and every earlier attempt is unknown to the
      *               bank (no money moved), declined, or answered "not paid"
@@ -388,6 +392,7 @@ class EqubPaymentController extends Controller
     protected function roundStatus($memberships, ?string $paymentDate): string
     {
         $this->retryAfter = null;
+        $this->retryUnknown = false;
 
         if (blank($paymentDate) || $memberships->isEmpty()) {
             return 'clear';
@@ -431,20 +436,24 @@ class EqubPaymentController extends Controller
         $wait = 0;
 
         foreach ($attempts as $reference => $rows) {
+            $slug = (string) $rows->first()->payment_method?->value;
+
             // How old the newest row of this attempt is. Past the order's own
             // expiry the bank can no longer take this money, whatever else is
-            // true of it.
+            // true of it, so it never blocks a new payment.
             $newest = $rows->map(fn (EqubPayment $p) => $p->created_at?->getTimestamp())->filter()->max();
             $age = $newest ? max(0, now()->getTimestamp() - (int) $newest) : PHP_INT_MAX;
+            $lifetime = $this->orderLifetimeSeconds($slug);
 
-            if ($age >= self::ORDER_LIFETIME_SECONDS) {
+            if ($age >= $lifetime) {
                 continue;
             }
 
-            $gateway = $gateways->tryGet((string) $rows->first()->payment_method?->value);
+            $gateway = $gateways->tryGet($slug);
 
             if (! $gateway) {
                 $inDoubt = $unknownWait = true;
+                $wait = max($wait, $lifetime - $age);
 
                 continue;
             }
@@ -460,6 +469,7 @@ class EqubPaymentController extends Controller
                     'error' => $e->getMessage(),
                 ]);
                 $inDoubt = $unknownWait = true;
+                $wait = max($wait, $lifetime - $age);
 
                 continue;
             }
@@ -468,7 +478,7 @@ class EqubPaymentController extends Controller
                 continue; // settled just now; the query below sees it
             }
 
-            $hold = $this->retryHold($result, $age);
+            $hold = $this->retryHold($result, $age, $lifetime);
 
             if ($hold === 0) {
                 continue;
@@ -476,20 +486,50 @@ class EqubPaymentController extends Controller
 
             $inDoubt = true;
 
+            // Unknown still ends when the order expires at the bank.
             if ($hold === null) {
                 $unknownWait = true;
-            } else {
-                $wait = max($wait, $hold);
+                $hold = $lifetime - $age;
             }
+
+            $wait = max($wait, $hold);
         }
 
         if ($forRound()->where('status', EqubPaymentStatus::Paid)->exists()) {
             return 'paid';
         }
 
-        $this->retryAfter = $inDoubt && ! $unknownWait ? $wait : null;
+        $this->retryAfter = $inDoubt ? $wait : null;
+        $this->retryUnknown = $inDoubt && $unknownWait;
 
         return $inDoubt ? 'in_doubt' : 'clear';
+    }
+
+    /**
+     * How long an order can still be paid at the bank, in seconds.
+     *
+     * It is the order's own timeout_express ("10m", "2h"), the gateway
+     * setting shown as Order Timeout on the Settings page, because that is
+     * what the bank is told. Past it the bank will not take the money, so an
+     * earlier attempt older than this never blocks a new payment, whatever the
+     * bank did or did not say about it. A shorter Order Timeout therefore
+     * shortens the longest wait a member can ever see.
+     *
+     * Never more than the 120 minutes this used to be fixed at, and anything
+     * unreadable falls back to that.
+     */
+    protected function orderLifetimeSeconds(string $slug): int
+    {
+        $prefix = strtoupper((string) config("payments.gateways.{$slug}.env_prefix", $slug));
+        $value = strtolower(trim((string) app(\App\Services\EnvService::class)->get($prefix.'_TIMEOUT_EXPRESS', '120m')));
+
+        if (! preg_match('/^(\d+)\s*([mhd])$/', $value, $match)) {
+            return self::MAX_ORDER_LIFETIME_SECONDS;
+        }
+
+        $seconds = (int) $match[1] * ['m' => 60, 'h' => 3600, 'd' => 86400][$match[2]];
+
+        return max(60, min(self::MAX_ORDER_LIFETIME_SECONDS, $seconds));
     }
 
     /**
@@ -513,8 +553,8 @@ class EqubPaymentController extends Controller
      * still credits it.
      *
      * Not being able to ask at all is different (nothing is known), so that
-     * still holds for the order's life, exactly as before. So does a check
-     * another worker is running right now.
+     * holds until the order expires at the bank (orderLifetimeSeconds()), as
+     * before. So does a check another worker is running right now.
      *
      * "Unconfigured" is not doubt about THIS payment: this server simply
      * cannot ask the bank anything. Treating it as doubt would refuse every
@@ -522,9 +562,15 @@ class EqubPaymentController extends Controller
      * clear it.
      *
      * @param  array<string, mixed>  $result  from PaymentSettlementService::reconcile()
+     * @param  int  $age  seconds since the attempt was made
+     * @param  int  $lifetime  seconds the order stays payable; see orderLifetimeSeconds()
      */
-    protected function retryHold(array $result, int $age): ?int
+    protected function retryHold(array $result, int $age, int $lifetime = self::MAX_ORDER_LIFETIME_SECONDS): ?int
     {
+        if ($age >= $lifetime) {
+            return 0;
+        }
+
         if ($result['locked'] ?? false) {
             return null;
         }
@@ -539,7 +585,7 @@ class EqubPaymentController extends Controller
             return null;
         }
 
-        $grace = $this->retryGraceSeconds();
+        $grace = min($this->retryGraceSeconds(), $lifetime);
 
         return $age < $grace ? $grace - $age : 0;
     }
@@ -571,16 +617,17 @@ class EqubPaymentController extends Controller
      */
     protected function roundBlocked(string $round, bool $batch): JsonResponse
     {
-        // Known only when every earlier attempt was answered by the bank as
-        // not paid; see retryHold().
+        // How long until a new payment will be accepted; see roundStatus().
         $wait = $round === 'paid' ? null : $this->retryAfter;
+        $when = $wait === null ? null
+            : ($wait <= 60 ? 'about a minute' : 'about '.(int) ceil($wait / 60).' minutes');
 
         $message = match (true) {
             $round === 'paid' => $batch
                 ? 'One or more of these contributions has already been paid. Refresh and try again.'
                 : 'This contribution has already been paid.',
-            $wait !== null => 'Your last payment for this date has not gone through yet. If you cancelled it or it did not work, you can try again in '
-                .($wait <= 60 ? 'about a minute' : 'about '.(int) ceil($wait / 60).' minutes').'.',
+            $when !== null && ! $this->retryUnknown => 'Your last payment for this date has not gone through yet. If you cancelled it or it did not work, you can try again in '.$when.'.',
+            $when !== null => 'We are still checking your last payment for this date with the bank. Please check again in '.$when.' before paying again.',
             default => 'Your last payment for this date is still being confirmed by the bank. Please wait a minute and check again before paying.',
         };
 
