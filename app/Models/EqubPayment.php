@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Enums\EqubPaymentMethod;
 use App\Enums\EqubPaymentStatus;
 use App\Services\CommissionService;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Str;
@@ -144,6 +145,25 @@ class EqubPayment extends Model
     public function reconciledBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'reconciled_by');
+    }
+
+    /**
+     * The bank receipt link, always as a URL that opens (or null).
+     *
+     * Dashen's first production receipt arrived with text in front of the URL
+     * ("= https://..."), and a link without a scheme is relative: the admin
+     * panel opened it on our own domain and showed a 404. Settlement now
+     * stores the clean URL (see DashenGateway::receiptUrl()); this accessor
+     * also cleans anything stored before that, so every screen and export
+     * that reads bank_receipt_url gets a working link either way.
+     */
+    protected function bankReceiptUrl(): Attribute
+    {
+        return Attribute::make(
+            get: fn ($value): ?string => preg_match('~https?://[^\s"\'<>]+~i', (string) $value, $match)
+                ? $match[0]
+                : null,
+        );
     }
 
     public function isPending(): bool

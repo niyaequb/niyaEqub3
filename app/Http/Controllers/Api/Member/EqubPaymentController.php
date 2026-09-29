@@ -40,6 +40,18 @@ use Illuminate\Support\Str;
 class EqubPaymentController extends Controller
 {
     /**
+     * How long a Dashen order can still be paid: timeout_express, 120m. An
+     * earlier attempt older than this cannot move money any more.
+     */
+    private const ORDER_LIFETIME_SECONDS = 120 * 60;
+
+    /**
+     * Roughly how many seconds a refused retry has to wait, when that is
+     * known. Set by roundStatus() for roundBlocked().
+     */
+    private ?int $retryAfter = null;
+
+    /**
      * List payments for current user's memberships.
      */
     public function index(Request $request): JsonResponse
@@ -357,9 +369,11 @@ class EqubPaymentController extends Controller
      *               order's own 120-minute expiry; past that the bank cannot
      *               take the money any more.
      *
-     *   'clear'     Nothing paid, and every earlier attempt is either unknown
-     *               to the bank (no money moved) or declined. A cancelled
-     *               attempt must not lock the member out, so this proceeds.
+     *   'clear'     Nothing paid, and every earlier attempt is unknown to the
+     *               bank (no money moved), declined, or answered "not paid"
+     *               longer ago than the grace period. A cancelled attempt must
+     *               not lock the member out, so this proceeds. How long each
+     *               kind of earlier attempt holds a new one: see retryHold().
      *
      * COST
      *
@@ -373,6 +387,8 @@ class EqubPaymentController extends Controller
      */
     protected function roundStatus($memberships, ?string $paymentDate): string
     {
+        $this->retryAfter = null;
+
         if (blank($paymentDate) || $memberships->isEmpty()) {
             return 'clear';
         }
@@ -411,16 +427,24 @@ class EqubPaymentController extends Controller
         $gateways = app(PaymentGatewayManager::class);
         $settlement = app(PaymentSettlementService::class);
         $inDoubt = false;
+        $unknownWait = false;
+        $wait = 0;
 
         foreach ($attempts as $reference => $rows) {
-            // Past the order's own expiry the bank can no longer take this
-            // money, whatever else is true of it.
-            $live = $rows->contains(fn (EqubPayment $p) => $p->created_at?->gte(now()->subMinutes(120)));
+            // How old the newest row of this attempt is. Past the order's own
+            // expiry the bank can no longer take this money, whatever else is
+            // true of it.
+            $newest = $rows->map(fn (EqubPayment $p) => $p->created_at?->getTimestamp())->filter()->max();
+            $age = $newest ? max(0, now()->getTimestamp() - (int) $newest) : PHP_INT_MAX;
+
+            if ($age >= self::ORDER_LIFETIME_SECONDS) {
+                continue;
+            }
 
             $gateway = $gateways->tryGet((string) $rows->first()->payment_method?->value);
 
             if (! $gateway) {
-                $inDoubt = $inDoubt || $live;
+                $inDoubt = $unknownWait = true;
 
                 continue;
             }
@@ -435,7 +459,7 @@ class EqubPaymentController extends Controller
                     'reference' => $reference,
                     'error' => $e->getMessage(),
                 ]);
-                $inDoubt = $inDoubt || $live;
+                $inDoubt = $unknownWait = true;
 
                 continue;
             }
@@ -444,23 +468,102 @@ class EqubPaymentController extends Controller
                 continue; // settled just now; the query below sees it
             }
 
-            // "Unconfigured" is not doubt about THIS payment: this server
-            // simply cannot ask the bank anything. Treating it as doubt would
-            // refuse every retry after a cancelled attempt, for two hours,
-            // with nothing able to clear it.
-            $unclear = ($result['locked'] ?? false)
-                || (($result['pending'] ?? false)
-                    && ! ($result['not_found'] ?? false)
-                    && ! ($result['unconfigured'] ?? false));
+            $hold = $this->retryHold($result, $age);
 
-            $inDoubt = $inDoubt || ($unclear && $live);
+            if ($hold === 0) {
+                continue;
+            }
+
+            $inDoubt = true;
+
+            if ($hold === null) {
+                $unknownWait = true;
+            } else {
+                $wait = max($wait, $hold);
+            }
         }
 
         if ($forRound()->where('status', EqubPaymentStatus::Paid)->exists()) {
             return 'paid';
         }
 
+        $this->retryAfter = $inDoubt && ! $unknownWait ? $wait : null;
+
         return $inDoubt ? 'in_doubt' : 'clear';
+    }
+
+    /**
+     * How long an earlier attempt that has not settled should still hold up
+     * a new one: 0 for not at all, a number of seconds, or null when nobody
+     * can say.
+     *
+     * WHY A "NOT PAID" ANSWER ONLY HOLDS FOR A GRACE PERIOD
+     *
+     * It used to hold for the order's whole 120-minute life whenever the bank
+     * answered with a status not on the gateway's lists, and that is how
+     * Dashen answer for an order the member backed out of, could not fund or
+     * lost the network on. A member who cancelled could not pay again for two
+     * hours.
+     *
+     * An answer that is not PAID means no money has moved as of now. The only
+     * way it still could is a payment already submitted and in flight, which
+     * settles in seconds; the grace period (PAYMENT_RETRY_GRACE_MINUTES,
+     * default 2) covers that. After it the attempt stops blocking. It is NOT
+     * marked failed: if the bank reports it paid after all, reconciliation
+     * still credits it.
+     *
+     * Not being able to ask at all is different (nothing is known), so that
+     * still holds for the order's life, exactly as before. So does a check
+     * another worker is running right now.
+     *
+     * "Unconfigured" is not doubt about THIS payment: this server simply
+     * cannot ask the bank anything. Treating it as doubt would refuse every
+     * retry after a cancelled attempt, for two hours, with nothing able to
+     * clear it.
+     *
+     * @param  array<string, mixed>  $result  from PaymentSettlementService::reconcile()
+     */
+    protected function retryHold(array $result, int $age): ?int
+    {
+        if ($result['locked'] ?? false) {
+            return null;
+        }
+
+        if (! ($result['pending'] ?? false)
+            || ($result['not_found'] ?? false)
+            || ($result['unconfigured'] ?? false)) {
+            return 0;
+        }
+
+        if (! $this->bankAnswered($result)) {
+            return null;
+        }
+
+        $grace = $this->retryGraceSeconds();
+
+        return $age < $grace ? $grace - $age : 0;
+    }
+
+    /**
+     * Did the bank look the order up and answer, without saying it was paid?
+     *
+     * Set by the gateway (DashenGateway::verifyPayment()) and carried through
+     * by PaymentSettlementService::handleUnverified(). Absent means no: an
+     * attempt nobody could ask about keeps blocking, as it always did.
+     *
+     * @param  array<string, mixed>  $result
+     */
+    protected function bankAnswered(array $result): bool
+    {
+        return ($result['answered'] ?? false) === true;
+    }
+
+    /** Seconds an answered-but-unpaid attempt keeps blocking a new one. */
+    protected function retryGraceSeconds(): int
+    {
+        $minutes = (int) app(\App\Services\EnvService::class)->get('PAYMENT_RETRY_GRACE_MINUTES', '2');
+
+        return max(1, min(120, $minutes)) * 60;
     }
 
     /**
@@ -468,16 +571,24 @@ class EqubPaymentController extends Controller
      */
     protected function roundBlocked(string $round, bool $batch): JsonResponse
     {
-        $message = $round === 'paid'
-            ? ($batch
+        // Known only when every earlier attempt was answered by the bank as
+        // not paid; see retryHold().
+        $wait = $round === 'paid' ? null : $this->retryAfter;
+
+        $message = match (true) {
+            $round === 'paid' => $batch
                 ? 'One or more of these contributions has already been paid. Refresh and try again.'
-                : 'This contribution has already been paid.')
-            : 'Your last payment for this date is still being confirmed by the bank. Please wait a minute and check again before paying.';
+                : 'This contribution has already been paid.',
+            $wait !== null => 'Your last payment for this date has not gone through yet. If you cancelled it or it did not work, you can try again in '
+                .($wait <= 60 ? 'about a minute' : 'about '.(int) ceil($wait / 60).' minutes').'.',
+            default => 'Your last payment for this date is still being confirmed by the bank. Please wait a minute and check again before paying.',
+        };
 
         return response()->json([
             'status' => 'error',
             'code' => $round === 'paid' ? 'already_paid' : 'payment_in_progress',
             'message' => $message,
+            'retry_after' => $wait,
         ], 409);
     }
 

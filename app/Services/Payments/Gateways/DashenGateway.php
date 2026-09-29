@@ -230,12 +230,26 @@ class DashenGateway extends FabricGateway
             'not found'
         );
 
+        // Did the bank actually look this order up and answer? A 2xx with a
+        // body is an answer, and so is "not found"; since neither says PAID,
+        // no money has moved as of now. Anything else (our credentials or our
+        // request refused, a rate limit, a server error) says nothing about
+        // the payment, so it does not count.
+        //
+        // EqubPaymentController::roundStatus() depends on the difference: an
+        // answered-but-unpaid attempt (the member backed out, could not fund
+        // it, lost the network) stops blocking a new payment after a short
+        // grace period; an unanswered one keeps blocking, because nothing is
+        // known about it.
+        $answered = $notFound || ($response->successful() && is_array($data));
+
         Log::warning('Payment verification was inconclusive; leaving pending', [
             'gateway' => $this->slug(),
             'reference' => $reference,
             'http' => $response->status(),
             'status' => $status !== '' ? $status : '(none returned)',
             'not_found' => $notFound,
+            'answered' => $answered,
             'body' => $data,
         ]);
 
@@ -243,9 +257,13 @@ class DashenGateway extends FabricGateway
             'success' => false,
             'pending' => true,
             'not_found' => $notFound,
-            'message' => $notFound
-                ? 'The bank has no record of this order yet.'
-                : 'The bank did not confirm this payment either way.',
+            'answered' => $answered,
+            'status' => $status,
+            'message' => match (true) {
+                $notFound => 'The bank has no record of this order yet.',
+                $answered => 'The bank did not confirm this payment either way.',
+                default => 'The bank could not look this payment up right now.',
+            },
             'data' => $data,
         ];
     }
@@ -303,12 +321,30 @@ class DashenGateway extends FabricGateway
             'amount' => data_get($body, 'amount.total_amount'),
             'payer_phone' => data_get($body, 'phoneNumber'),
             'payer_account' => data_get($body, 'debit_account'),
-            'receipt_url' => data_get($body, 'receipt_link'),
+            'receipt_url' => $this->receiptUrl(data_get($body, 'receipt_link')),
             // The whole response, credit_account and internalCode included.
             // Fields nobody thought to model are the ones a reconciliation
             // dispute turns on a year later.
             'payload' => $data === [] ? null : $data,
         ];
+    }
+
+    /**
+     * The receipt link as a URL that can actually be opened, or null.
+     *
+     * In production the admin panel's receipt link came out as
+     * "= https://receipts.dashenbanksc.com/receipt/...": text in front of the
+     * URL. A link that does not start with a scheme is relative, so it opened
+     * on our own domain and showed a 404. Only the URL itself is kept here;
+     * the raw value is still in `payload`.
+     */
+    protected function receiptUrl(mixed $value): ?string
+    {
+        if (! is_string($value) || ! preg_match('~https?://[^\s"\'<>]+~i', $value, $match)) {
+            return null;
+        }
+
+        return $match[0];
     }
 
     /**

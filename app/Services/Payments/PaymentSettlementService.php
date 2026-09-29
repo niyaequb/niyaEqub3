@@ -464,6 +464,14 @@ class PaymentSettlementService
                 'pending' => true,
                 'not_found' => (bool) ($verification['not_found'] ?? false),
                 'unconfigured' => (bool) ($verification['unconfigured'] ?? false),
+                // Whether the bank looked the order up and answered, just not
+                // with PAID, as opposed to not being reachable at all. The
+                // guard lets a member pay again a couple of minutes after an
+                // answered "not paid" (they cancelled, could not fund it, lost
+                // the network) but keeps waiting when nothing is known. See
+                // EqubPaymentController::retryHold().
+                'answered' => (bool) ($verification['answered'] ?? false),
+                'status' => $verification['status'] ?? null,
                 'message' => 'Settlement could not be verified; contributions left pending.',
             ];
         }
