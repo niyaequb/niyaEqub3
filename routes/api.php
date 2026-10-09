@@ -80,6 +80,9 @@ Route::get('app-version', [\App\Http\Controllers\Api\AppVersionController::class
 Route::get('faqs', [\App\Http\Controllers\Api\FaqController::class, 'index']);
 Route::get('exchange-rates', [\App\Http\Controllers\Api\ExchangeRateController::class, 'index']);
 Route::get('promotions', [\App\Http\Controllers\Api\PromoController::class, 'index']);
+// Adhan voices for the Islamic Center (Prayer settings -> Adhan voice).
+// Public, like the rest of that section.
+Route::get('azan-voices', [\App\Http\Controllers\Api\AzanVoiceController::class, 'index']);
 
 /*
 |--------------------------------------------------------------------------

@@ -29,6 +29,8 @@ class AppServiceProvider extends ServiceProvider
 
         \App\Models\EqubPayment::observe(\App\Observers\EqubPaymentObserver::class);
         \App\Models\EqubDraw::observe(\App\Observers\EqubDrawObserver::class);
+        // The permanent "who joined which Equb, and when" record.
+        \App\Models\EqubMembership::observe(\App\Observers\EqubMembershipObserver::class);
 
         FilamentView::registerRenderHook(
             'panels::body.end',

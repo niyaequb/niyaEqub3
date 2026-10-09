@@ -310,6 +310,14 @@ class EqubMembership extends Model
     /**
      * Generate the expected payment schedule based on join date, rounds, and frequency.
      * Matches against actual paid contributions to determine status.
+     *
+     * WHICH ROUNDS ARE PAID — see paidRoundIndexes(). A round used to count as
+     * paid when its position was below the number of paid contributions, so
+     * the first N rounds went green for N payments whatever dates they were
+     * for. The payment guard (EqubPaymentController::roundStatus) decides by
+     * the date instead, and the two disagreed as soon as a member skipped a
+     * day: the app offered a round the guard refused as "already paid", and
+     * the round really still open — often the last one — could never be paid.
      */
     public function getPaymentScheduleAttribute(): array
     {
@@ -329,8 +337,7 @@ class EqubMembership extends Model
             return [];
         }
 
-        $paidCount = $this->payments()->where('status', \App\Enums\EqubPaymentStatus::Paid)->count();
-        $schedule = [];
+        $dates = [];
 
         for ($i = 0; $i < $rounds; $i++) {
             $expectedDate = $this->join_date->copy();
@@ -340,15 +347,79 @@ class EqubMembership extends Model
                 $expectedDate->addDays($i * $this->contribution_frequency_days);
             }
 
+            $dates[] = $expectedDate;
+        }
+
+        $paid = $this->paidRoundIndexes($dates);
+        $schedule = [];
+
+        foreach ($dates as $i => $expectedDate) {
             $schedule[] = [
                 'round' => $i + 1,
                 'expected_date' => $expectedDate->toIso8601String(),
                 'amount' => (float) $this->contribution_amount,
-                'status' => $i < $paidCount ? 'paid' : 'pending',
+                'status' => isset($paid[$i]) ? 'paid' : 'pending',
             ];
         }
 
         return $schedule;
+    }
+
+    /**
+     * Which rounds (0-based positions in $dates) count as paid.
+     *
+     * The same rule as the payment guard and the app (PaymentCalculator
+     * .paidRoundIndexes): a paid contribution covers the round on ITS OWN
+     * DATE. Only a contribution dated for no round — recorded by hand, or a
+     * second one for a day already covered — fills the earliest round still
+     * open, so nothing that was paid is ever lost from the count.
+     *
+     * @param  array<int, \Carbon\CarbonInterface>  $dates
+     * @return array<int, true>
+     */
+    protected function paidRoundIndexes(array $dates): array
+    {
+        $roundByDay = [];
+        foreach ($dates as $i => $date) {
+            $roundByDay[$date->toDateString()] ??= $i;
+        }
+
+        $paidOn = $this->payments()
+            ->where('status', \App\Enums\EqubPaymentStatus::Paid)
+            ->orderBy('payment_date')
+            ->orderBy('id')
+            ->pluck('payment_date');
+
+        $paid = [];
+        $unmatched = 0;
+
+        foreach ($paidOn as $paymentDate) {
+            $round = null;
+
+            if ($paymentDate !== null) {
+                $day = $paymentDate instanceof \DateTimeInterface
+                    ? \Illuminate\Support\Carbon::instance($paymentDate)->toDateString()
+                    : \Illuminate\Support\Carbon::parse($paymentDate)->toDateString();
+                $round = $roundByDay[$day] ?? null;
+            }
+
+            if ($round !== null && ! isset($paid[$round])) {
+                $paid[$round] = true;
+
+                continue;
+            }
+
+            $unmatched++;
+        }
+
+        for ($i = 0, $n = count($dates); $i < $n && $unmatched > 0; $i++) {
+            if (! isset($paid[$i])) {
+                $paid[$i] = true;
+                $unmatched--;
+            }
+        }
+
+        return $paid;
     }
 
     /**

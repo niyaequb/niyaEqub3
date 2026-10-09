@@ -58,7 +58,19 @@ class EqubGroupController extends Controller
             $q->where('member_id', $member?->id);
         });
 
-        $groups = $query->latest()->paginate($request->input('per_page', 15));
+        // A package's own plans, shortest cycle first - Daily, Weekly, Monthly -
+        // the same order as the cycles on its card in the app. Newest first
+        // put Monthly at the top of every package. Any other list (no package
+        // chosen) stays newest first.
+        if ($request->filled('equb_package_id')) {
+            $query->orderByRaw('contribution_frequency_days IS NULL')
+                ->orderBy('contribution_frequency_days')
+                ->orderBy('id');
+        } else {
+            $query->latest();
+        }
+
+        $groups = $query->paginate($request->input('per_page', 15));
 
         return response()->json([
             'status' => 'success',
