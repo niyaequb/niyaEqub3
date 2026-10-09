@@ -23,14 +23,25 @@ class EqubPackageController extends Controller
      * another package. This replaces newest-first, which put Hajj at the top
      * of the list.
      */
+    /**
+     * The order the Equb list shows the packages in: shortest term first —
+     * Raha (3 months), Iman (6), Al-Nur (12), Al-Sabr (24), then the two
+     * seasonal ones, then anything else.
+     *
+     * Hajj is tested first only so that a name mentioning two packages
+     * ("Hajj Raha") lands on one of them predictably; the number after THEN
+     * is what sets the position. The app sorts the list the same way, in
+     * Mobile/lib/core/util/package_names.dart (FixedPackage.listOrder) —
+     * change both.
+     */
     private const LIST_ORDER = <<<'SQL'
         CASE
             WHEN name LIKE '%ሀጅ%' OR name LIKE '%ሐጅ%' OR name LIKE '%ሃጅ%' OR name LIKE '%hajj%' THEN 6
-            WHEN name LIKE '%ሰብር%' OR name LIKE '%ሶብር%' OR name LIKE '%sabr%' OR name LIKE '%sabir%' THEN 1
-            WHEN name LIKE '%ኑር%' OR name LIKE '%nur%' OR name LIKE '%nuur%' OR name LIKE '%noor%' THEN 2
-            WHEN name LIKE '%ኢማን%' OR name LIKE '%እማን%' OR name LIKE '%ኤማን%' OR name LIKE '%iman%' OR name LIKE '%eman%' OR name LIKE '%imaana%' THEN 3
+            WHEN name LIKE '%ረሀ%' OR name LIKE '%ራሀ%' OR name LIKE '%ረሐ%' OR name LIKE '%ራሐ%' OR name LIKE '%ረሃ%' OR name LIKE '%ራሃ%' OR name LIKE '%raha%' THEN 1
+            WHEN name LIKE '%ኢማን%' OR name LIKE '%እማን%' OR name LIKE '%ኤማን%' OR name LIKE '%iman%' OR name LIKE '%eman%' OR name LIKE '%imaana%' THEN 2
+            WHEN name LIKE '%ኑር%' OR name LIKE '%nur%' OR name LIKE '%nuur%' OR name LIKE '%noor%' THEN 3
+            WHEN name LIKE '%ሰብር%' OR name LIKE '%ሶብር%' OR name LIKE '%sabr%' OR name LIKE '%sabir%' THEN 4
             WHEN name LIKE '%ረመዳን%' OR name LIKE '%ረመዷን%' OR name LIKE '%ረማዳን%' OR name LIKE '%ramadan%' OR name LIKE '%ramadhan%' OR name LIKE '%ramadaana%' THEN 5
-            WHEN name LIKE '%ረሀ%' OR name LIKE '%ራሀ%' OR name LIKE '%ረሐ%' OR name LIKE '%ራሐ%' OR name LIKE '%ረሃ%' OR name LIKE '%ራሃ%' OR name LIKE '%raha%' THEN 4
             ELSE 7
         END
         SQL;
