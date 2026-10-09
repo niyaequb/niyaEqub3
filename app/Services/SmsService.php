@@ -11,6 +11,19 @@ use Illuminate\Support\Str;
 
 class SmsService
 {
+    /**
+     * The two providers, by the value SMS_MODE holds for each.
+     *
+     * SMS_MODE in the settings says which one the whole app uses. One send can
+     * be pointed at the other with usingProvider() — the Send Bulk SMS page
+     * does that, so a campaign can go out on GEEZ while the app's own OTPs
+     * keep using AFRO.
+     */
+    public const PROVIDERS = [
+        1 => 'AFRO',
+        2 => 'GEEZ',
+    ];
+
     protected EnvService $envService;
     protected $apiUrl;
     protected $token;
@@ -541,13 +554,40 @@ class SmsService
      */
     public function getActiveProvider(): string
     {
-        if ($this->smsMode == '1') {
-            return 'AFRO';
-        } elseif ($this->smsMode == '2') {
-            return 'GEEZ';
+        return self::PROVIDERS[(int) $this->smsMode] ?? 'None';
+    }
+
+    /**
+     * The same service pointed at one named provider.
+     *
+     * Returns a COPY, so the override lasts only as long as the copy and
+     * nothing else in the request — an OTP going out on the same tick, say —
+     * is switched with it. A null or unknown name leaves the provider as the
+     * settings have it, which is what "use the setting" in the UI passes.
+     */
+    public function usingProvider(?string $provider): self
+    {
+        $mode = array_search(strtoupper(trim((string) $provider)), self::PROVIDERS, true);
+
+        if ($mode === false) {
+            return $this;
         }
 
-        return 'None';
+        $copy = clone $this;
+        $copy->smsMode = $mode;
+
+        return $copy;
+    }
+
+    /**
+     * The providers to choose between, as value => label.
+     */
+    public static function providerOptions(): array
+    {
+        return [
+            'AFRO' => 'AFRO SMS',
+            'GEEZ' => 'GEEZ SMS',
+        ];
     }
 
     /**

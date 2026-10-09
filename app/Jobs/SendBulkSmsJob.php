@@ -20,12 +20,22 @@ class SendBulkSmsJob implements ShouldQueue
     public string $message;
 
     /**
+     * Which provider to send on: 'AFRO', 'GEEZ', or null for whichever one
+     * the settings name.
+     *
+     * Declared with a default so a job queued by an older build — whose
+     * payload has no such property — still unserialises.
+     */
+    public ?string $provider = null;
+
+    /**
      * Create a new job instance.
      */
-    public function __construct(array $recipient, string $message)
+    public function __construct(array $recipient, string $message, ?string $provider = null)
     {
         $this->recipient = $recipient;
         $this->message = $message;
+        $this->provider = $provider;
     }
 
     /**
@@ -37,6 +47,10 @@ class SendBulkSmsJob implements ShouldQueue
         if ($this->batch() && $this->batch()->cancelled()) {
             return;
         }
+
+        // The page may have asked for one provider in particular; otherwise
+        // this leaves the service on the one the settings name.
+        $smsService = $smsService->usingProvider($this->provider);
 
         try {
             $smsResponse = $smsService->sendSms(
@@ -51,6 +65,7 @@ class SendBulkSmsJob implements ShouldQueue
                 'phone' => $this->recipient['phone'],
                 'name' => $this->recipient['name'] ?? 'Unknown',
                 'status' => $smsResponse['status'] ?? 'unknown',
+                'provider' => $smsService->getActiveProvider(),
             ]);
         } catch (\Exception $e) {
             Log::error('Failed to send SMS in job', [

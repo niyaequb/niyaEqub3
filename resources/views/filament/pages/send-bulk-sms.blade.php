@@ -92,14 +92,62 @@
                         </h3>
                     </div> --}}
 
+                    <!-- Armed on every tab, so it is shown on every tab:
+                         switching to Manual Numbers must not hide the fact
+                         that the message is about to go to everyone. -->
+                    @if($allUsers)
+                        <div class="px-3 py-2 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg mb-3">
+                            <div class="flex items-center justify-between gap-3">
+                                <span class="text-xs font-medium text-green-800 dark:text-green-200">
+                                    {{ __('filament.bulk_sms.all_users_selected', ['count' => number_format($this->getEveryUserCount())]) }}
+                                </span>
+                                <button
+                                    type="button"
+                                    wire:click="toggleAllUsers"
+                                    class="text-xs text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 font-medium shrink-0"
+                                >
+                                    {{ __('filament.bulk_sms.clear_selection') }}
+                                </button>
+                            </div>
+                        </div>
+                    @endif
+
                     @if($activeTab !== 'manual')
+                        <!-- Send to every user -->
+                        <button
+                            type="button"
+                            wire:click="toggleAllUsers"
+                            wire:loading.attr="disabled"
+                            wire:target="toggleAllUsers"
+                            class="w-full mb-3 flex items-center gap-3 px-3 py-3 text-left rounded-lg border transition-colors @if($allUsers) border-green-500 bg-green-50 dark:bg-green-900/20 @else border-gray-200 dark:border-gray-700 hover:border-green-400 hover:bg-gray-50 dark:hover:bg-gray-700/40 @endif"
+                        >
+                            <span class="flex items-center justify-center w-5 h-5 rounded border shrink-0 @if($allUsers) bg-green-600 border-green-600 @else border-gray-300 dark:border-gray-600 @endif">
+                                @if($allUsers)
+                                    <svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" />
+                                    </svg>
+                                @endif
+                            </span>
+                            <span class="flex-1">
+                                <span class="block text-sm font-semibold text-gray-900 dark:text-white">
+                                    {{ __('filament.bulk_sms.all_users') }}
+                                </span>
+                                <span class="block text-xs text-gray-600 dark:text-gray-400">
+                                    {{ __('filament.bulk_sms.all_users_help') }}
+                                </span>
+                            </span>
+                            <span class="text-xs font-semibold px-2 py-1 rounded-full shrink-0 @if($allUsers) bg-green-600 text-white @else bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300 @endif">
+                                {{ number_format($this->getEveryUserCount()) }}
+                            </span>
+                        </button>
+
                         <!-- Multiselect Dropdown -->
                         <div class="mb-3" wire:key="multiselect-{{ $activeTab }}">
                             {{ $this->form }}
                         </div>
 
                         <!-- Selected Count -->
-                        @if($activeTab === 'users' && count($selectedUsers) > 0)
+                        @if(! $allUsers && $activeTab === 'users' && count($selectedUsers) > 0)
                             <div class="px-3 py-2 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg mb-3">
                                 <div class="flex items-center justify-between">
                                     <span class="text-xs font-medium text-green-800 dark:text-green-200">
@@ -182,6 +230,26 @@
                     </div>
                         <span>{{ __('filament.bulk_sms.message') }}</span>
                     </h3>
+
+                    <!-- Which provider this send goes out on -->
+                    <div class="mb-3">
+                        <label for="bulk-sms-provider" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            {{ __('filament.bulk_sms.provider') }}
+                        </label>
+                        <select
+                            id="bulk-sms-provider"
+                            wire:model.live="provider"
+                            class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                        >
+                            @foreach($this->getProviderOptions() as $value => $label)
+                                <option value="{{ $value }}">{{ $label }}</option>
+                            @endforeach
+                        </select>
+                        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                            {{ __('filament.bulk_sms.provider_help') }}
+                        </p>
+                    </div>
+
                     <form wire:submit.prevent="sendSms">
                         <div class="space-y-2">
                             <textarea
