@@ -1,5 +1,31 @@
 <x-filament-panels::page>
     <div class="space-y-6">
+        @php($queueState = $this->getQueueState())
+
+        <!-- Work is sitting on the queue with nobody taking it off. Said
+             here rather than only after a send, because the messages already
+             waiting are the ones the admin is wondering about. -->
+        @if($queueState['stale'])
+            <div class="rounded-lg border border-amber-300 bg-amber-50 p-4 dark:border-amber-700 dark:bg-amber-900/20">
+                <div class="flex items-start gap-3">
+                    <svg class="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                    </svg>
+                    <div>
+                        <h3 class="text-sm font-semibold text-amber-900 dark:text-amber-100">
+                            {{ __('filament.bulk_sms.queue_stuck') }}
+                        </h3>
+                        <p class="mt-1 text-xs text-amber-800 dark:text-amber-200">
+                            {{ __('filament.bulk_sms.queue_stuck_body', [
+                                'count' => number_format($queueState['pending']),
+                                'minutes' => (int) round($queueState['seconds'] / 60),
+                            ]) }}
+                        </p>
+                    </div>
+                </div>
+            </div>
+        @endif
+
         <!-- Header -->
         <div class="flex items-center justify-between">
             <div>
@@ -268,6 +294,60 @@
                         </div>
                     </form>
                 </div>
+
+                @php($batch = $this->getBatchStatus())
+
+                @if($batch)
+                    <div
+                        class="bg-white dark:bg-gray-800 rounded-lg shadow p-4 mt-4"
+                        @if(! $batch['finished'] && ! $batch['cancelled']) wire:poll.10s @endif
+                    >
+                        <div class="flex items-center justify-between mb-3">
+                            <h3 class="text-base font-semibold text-gray-900 dark:text-white">
+                                {{ __('filament.bulk_sms.batch_progress') }}
+                            </h3>
+                            <span class="text-xs font-semibold text-gray-600 dark:text-gray-300">
+                                {{ $batch['progress'] }}%
+                            </span>
+                        </div>
+
+                        <div class="w-full h-2 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+                            <div
+                                class="h-2 rounded-full bg-green-600 transition-all"
+                                style="width: {{ max(2, (int) $batch['progress']) }}%"
+                            ></div>
+                        </div>
+
+                        <div class="mt-3 space-y-1.5">
+                            <div class="flex justify-between">
+                                <span class="text-xs text-gray-600 dark:text-gray-400">{{ __('filament.bulk_sms.batch_sent') }}:</span>
+                                <span class="text-xs font-medium text-gray-900 dark:text-white">
+                                    {{ number_format($batch['processed_jobs']) }} / {{ number_format($batch['total_jobs']) }}
+                                </span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-xs text-gray-600 dark:text-gray-400">{{ __('filament.bulk_sms.batch_waiting') }}:</span>
+                                <span class="text-xs font-medium text-gray-900 dark:text-white">{{ number_format($batch['pending_jobs']) }}</span>
+                            </div>
+                            @if($batch['failed_jobs'] > 0)
+                                <div class="flex justify-between">
+                                    <span class="text-xs text-red-600 dark:text-red-400">{{ __('filament.bulk_sms.errors') }}:</span>
+                                    <span class="text-xs font-medium text-red-600 dark:text-red-400">{{ number_format($batch['failed_jobs']) }}</span>
+                                </div>
+                            @endif
+                        </div>
+
+                        <p class="mt-3 text-xs text-gray-500 dark:text-gray-400">
+                            @if($batch['finished'])
+                                {{ __('filament.bulk_sms.batch_finished') }}
+                            @elseif($batch['processed_jobs'] === 0)
+                                {{ __('filament.bulk_sms.batch_waiting_hint') }}
+                            @else
+                                {{ __('filament.bulk_sms.batch_running') }}
+                            @endif
+                        </p>
+                    </div>
+                @endif
 
                 @if($sendResult)
                     <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-4 mt-4">

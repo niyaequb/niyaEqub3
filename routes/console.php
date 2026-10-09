@@ -73,3 +73,32 @@ Schedule::command('reports:run-scheduled-prints')
     ->everyMinute()
     ->withoutOverlapping()
     ->runInBackground();
+
+/*
+|--------------------------------------------------------------------------
+| The queue
+|--------------------------------------------------------------------------
+|
+| Bulk SMS is the only work in this app that is queued, and until this line
+| existed nothing ever took it off the queue. Sending from the admin panel
+| said "SMS Batch Dispatched" — which is true, the rows went into `jobs` —
+| and then the messages sat there for ever. Nobody saw an error, because
+| there was no error: there was no worker.
+|
+| Rather than a supervisor process to install and watch, this rides the cron
+| that already runs every minute for the schedules above.
+|
+|   --stop-when-empty  the worker exits as soon as the queue is drained, so
+|                      on a quiet minute it costs one query and quits.
+|   --max-time=55      and if it is still working it stops before the next
+|                      tick, so the runs never pile up on each other.
+|   --tries=3          a message the provider refused once is retried twice
+|                      more before it is written to failed_jobs.
+|
+| withoutOverlapping carries its own expiry so a run killed mid-flight (a
+| deploy, a reboot) cannot leave a lock that blocks every later tick.
+*/
+Schedule::command('queue:work --stop-when-empty --max-time=55 --tries=3 --sleep=1')
+    ->everyMinute()
+    ->withoutOverlapping(10)
+    ->runInBackground();

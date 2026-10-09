@@ -13,6 +13,7 @@ use Filament\Pages\Page;
 use Filament\Schemas\Schema;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
@@ -29,6 +30,34 @@ class SendBulkSms extends Page implements HasForms
      * messages are already going out while the rest are still being queued.
      */
     protected const CHUNK = 500;
+
+    /**
+     * Up to this many recipients are sent during the request itself.
+     *
+     * Everything here used to go on the queue, including a test to a single
+     * number — and a queued message is only sent once a worker picks it up.
+     * A short list is now sent on the spot, so what the screen says is what
+     * actually happened, and testing does not depend on anything else being
+     * set up. A long list still goes on the queue: one request cannot hold a
+     * thousand calls to the provider open.
+     */
+    protected const INLINE_LIMIT = 25;
+
+    /**
+     * How long the inline send may take before the rest goes on the queue.
+     *
+     * Each call to a provider is allowed 60 seconds of its own, so a provider
+     * having a bad minute could otherwise hold the whole request open until
+     * the web server gave up and the admin saw a gateway error instead of a
+     * result. Past this point the remaining numbers — at most
+     * [INLINE_LIMIT] of them — are queued and reported as queued.
+     */
+    protected const INLINE_SECONDS = 20;
+
+    /**
+     * A queue with work older than this has nobody taking it off.
+     */
+    protected const STALE_SECONDS = 180;
 
     public static function getNavigationIcon(): ?string
     {
@@ -85,6 +114,9 @@ class SendBulkSms extends Page implements HasForms
 
     /** Counted once per request, not once per call. */
     protected ?int $everyUserCount = null;
+
+    /** @var array{pending:int,stale:bool,seconds:int}|null */
+    protected ?array $queueState = null;
 
     protected function getSmsService(): SmsService
     {
@@ -257,28 +289,22 @@ class SendBulkSms extends Page implements HasForms
     }
 
     /**
-     * Builds the jobs for this send and hands them over a chunk at a time.
+     * Hands over every recipient of this send, one at a time.
      *
      * The users are read with chunkById rather than all at once, so "send to
      * everyone" costs the same whether there are fifty users or fifty
      * thousand.
      */
-    protected function eachJobChunk(?string $provider, callable $handle): void
+    protected function eachRecipient(callable $handle): void
     {
         $smsService = $this->getSmsService();
-        $jobs = [];
 
-        $push = function (string $phone, ?string $name, $model) use (&$jobs, $provider, $smsService, $handle) {
-            $jobs[] = new SendBulkSmsJob([
+        $push = function (string $phone, ?string $name, $model) use ($smsService, $handle) {
+            $handle([
                 'phone' => $smsService->formatPhoneNumber($phone),
                 'name' => $name ?: 'Unknown',
                 'model' => $model,
-            ], $this->message, $provider);
-
-            if (count($jobs) >= self::CHUNK) {
-                $handle($jobs);
-                $jobs = [];
-            }
+            ]);
         };
 
         $addUsers = function ($users) use ($push) {
@@ -304,9 +330,70 @@ class SendBulkSms extends Page implements HasForms
                 $push($item['phone'], $item['name'] ?? null, null);
             }
         }
+    }
+
+    /**
+     * The same recipients, gathered into batches of jobs for the queue.
+     */
+    protected function eachJobChunk(?string $provider, callable $handle): void
+    {
+        $jobs = [];
+
+        $this->eachRecipient(function (array $recipient) use (&$jobs, $provider, $handle) {
+            $jobs[] = new SendBulkSmsJob($recipient, $this->message, $provider);
+
+            if (count($jobs) >= self::CHUNK) {
+                $handle($jobs);
+                $jobs = [];
+            }
+        });
 
         if ($jobs !== []) {
             $handle($jobs);
+        }
+    }
+
+    /**
+     * What the queue looks like right now.
+     *
+     * Only the database queue can be looked at this cheaply; on any other
+     * driver this says nothing rather than guessing. `sync` has no queue at
+     * all — the work happens in the request — so it never goes stale.
+     *
+     * @return array{pending:int,stale:bool,seconds:int}
+     */
+    public function getQueueState(): array
+    {
+        if ($this->queueState !== null) {
+            return $this->queueState;
+        }
+
+        $none = ['pending' => 0, 'stale' => false, 'seconds' => 0];
+
+        if (config('queue.default') !== 'database') {
+            return $this->queueState = $none;
+        }
+
+        try {
+            $pending = (int) DB::table('jobs')->count();
+
+            if ($pending === 0) {
+                return $this->queueState = $none;
+            }
+
+            // created_at on the jobs table is a unix timestamp, not a date.
+            $oldest = (int) DB::table('jobs')->min('created_at');
+            $seconds = max(0, time() - $oldest);
+
+            return $this->queueState = [
+                'pending' => $pending,
+                'stale' => $seconds >= self::STALE_SECONDS,
+                'seconds' => $seconds,
+            ];
+        } catch (\Throwable $e) {
+            // No jobs table, no permission — either way there is nothing
+            // useful to tell the admin, and this must never break the page.
+            return $this->queueState = $none;
         }
     }
 
@@ -358,6 +445,15 @@ class SendBulkSms extends Page implements HasForms
                 return;
             }
 
+            // A short list goes out here and now, so the screen can report
+            // what the provider actually said rather than only that the work
+            // was handed over.
+            if ($total <= self::INLINE_LIMIT) {
+                $this->sendNow($smsService, $provider);
+
+                return;
+            }
+
             // Dispatch the first chunk as the batch, then add the rest to it.
             $batch = null;
             $queued = 0;
@@ -400,14 +496,30 @@ class SendBulkSms extends Page implements HasForms
                 'provider_chosen_on_page' => $provider !== null,
             ]);
 
-            Notification::make()
-                ->title(__('filament.bulk_sms.batch_dispatched'))
-                ->body(__('filament.bulk_sms.batch_dispatched_body', [
-                    'count' => $queued,
-                    'batch_id' => $batch->id,
-                ]))
-                ->success()
-                ->send();
+            $queue = $this->getQueueState();
+
+            // Queued is not sent. If nothing is taking work off the queue,
+            // say so here rather than letting the messages sit unnoticed.
+            if ($queue['stale']) {
+                Notification::make()
+                    ->title(__('filament.bulk_sms.queue_stuck'))
+                    ->body(__('filament.bulk_sms.queue_stuck_body', [
+                        'count' => $queue['pending'],
+                        'minutes' => (int) round($queue['seconds'] / 60),
+                    ]))
+                    ->warning()
+                    ->persistent()
+                    ->send();
+            } else {
+                Notification::make()
+                    ->title(__('filament.bulk_sms.batch_dispatched'))
+                    ->body(__('filament.bulk_sms.batch_dispatched_body', [
+                        'count' => $queued,
+                        'batch_id' => $batch->id,
+                    ]))
+                    ->success()
+                    ->send();
+            }
 
             // Clear selections after dispatching
             $this->clearAll();
@@ -420,6 +532,121 @@ class SendBulkSms extends Page implements HasForms
                 ->danger()
                 ->send();
         }
+    }
+
+    /**
+     * Sends this list during the request and reports what came back.
+     *
+     * Only ever reached for a list of at most [INLINE_LIMIT] numbers, so the
+     * request cannot run long: a handful of calls to the provider, each of
+     * which already has its own timeout.
+     */
+    protected function sendNow(SmsService $smsService, ?string $provider): void
+    {
+        $sent = 0;
+        $failed = 0;
+        $firstError = null;
+        $deferred = [];
+        $deadline = microtime(true) + self::INLINE_SECONDS;
+
+        $this->eachRecipient(function (array $recipient) use ($smsService, $deadline, &$sent, &$failed, &$firstError, &$deferred) {
+            // Taking too long. The rest goes on the queue rather than holding
+            // the page open until the web server times out.
+            if (microtime(true) >= $deadline) {
+                $deferred[] = $recipient;
+
+                return;
+            }
+
+            try {
+                $response = $smsService->sendSms(
+                    $recipient['phone'],
+                    $this->message,
+                    null,
+                    $recipient['model'] ?? null
+                );
+
+                if (($response['status'] ?? null) === 'success') {
+                    $sent++;
+
+                    return;
+                }
+
+                $failed++;
+                $firstError ??= $response['message'] ?? null;
+            } catch (\Throwable $e) {
+                $failed++;
+                $firstError ??= $e->getMessage();
+            }
+        });
+
+        $this->batchId = null;
+        $this->sendResult = [
+            'total' => $sent + $failed,
+            'success' => $sent,
+            'error' => $failed,
+        ];
+
+        if ($deferred !== []) {
+            $batch = Bus::batch(array_map(
+                fn (array $recipient) => new SendBulkSmsJob($recipient, $this->message, $provider),
+                $deferred,
+            ))
+                ->name('Bulk SMS: '.count($deferred).' remaining ('.$smsService->getActiveProvider().')')
+                ->allowFailures()
+                ->onQueue('default')
+                ->dispatch();
+
+            $this->batchId = $batch->id;
+        }
+
+        Log::info('Bulk SMS sent inline', [
+            'sent' => $sent,
+            'failed' => $failed,
+            'queued' => count($deferred),
+            'provider' => $smsService->getActiveProvider(),
+            'first_error' => $firstError,
+        ]);
+
+        if ($deferred !== []) {
+            Notification::make()
+                ->title(__('filament.bulk_sms.send_partial'))
+                ->body(__('filament.bulk_sms.sent_then_queued', [
+                    'sent' => $sent,
+                    'queued' => count($deferred),
+                ]))
+                ->warning()
+                ->send();
+        } elseif ($failed === 0) {
+            Notification::make()
+                ->title(__('filament.bulk_sms.send_success'))
+                ->body(__('filament.bulk_sms.send_success_body', ['count' => $sent]))
+                ->success()
+                ->send();
+        } elseif ($sent === 0) {
+            Notification::make()
+                ->title(__('filament.bulk_sms.send_failed'))
+                ->body($firstError ?: __('filament.bulk_sms.send_failed_body', ['count' => $failed]))
+                ->danger()
+                ->persistent()
+                ->send();
+        } else {
+            Notification::make()
+                ->title(__('filament.bulk_sms.send_partial'))
+                ->body(__('filament.bulk_sms.send_partial_body', [
+                    'success' => $sent,
+                    'error' => $failed,
+                ]).($firstError ? ' '.$firstError : ''))
+                ->warning()
+                ->persistent()
+                ->send();
+        }
+
+        // Keep the result panel: clearAll() wipes it, so only the recipients
+        // and the message are reset here.
+        $result = $this->sendResult;
+        $this->clearAll();
+        $this->sendResult = $result;
     }
 
     public function getBatchStatus(): ?array
