@@ -17,6 +17,9 @@ class PromoController extends Controller
         $companyFacts = \App\Models\CompanyFact::where('is_active', true)->get();
 
         return response()->json([
+            // Seconds each banner stays on screen. Set from the admin panel
+            // (Banners -> Slide duration); the apps fall back to 5 if absent.
+            'banner_slide_duration' => \App\Models\Banner::slideDuration(),
             'banners' => BannerResource::collection($banners),
             'company_facts' => CompanyFactsResource::collection($companyFacts),
         ]);
