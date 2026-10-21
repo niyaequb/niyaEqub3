@@ -344,6 +344,29 @@ class Settings extends Page implements HasForms
             foreach ($gateways as $slug => $gateway) {
                 $f = fn (string $key): string => 'gw_'.$slug.'_'.$key;
 
+                // Hosted-checkout banks (EthSwitch NPG) have none of the fabric
+                // fields below. Show where they stand and move on.
+                if (! $gateway instanceof \App\Services\Payments\FabricGateway) {
+                    $schema[] = ComponentsSection::make($gateway->displayName())
+                        ->description(($gateway->isConfigured()
+                            ? 'CONFIGURED. Settlement is confirmed with the bank automatically.'
+                            : 'NOT CONFIGURED.')
+                            .' Set with php artisan tinker / the server installer ('
+                            .strtoupper((string) config("payments.gateways.{$slug}.env_prefix", $slug)).'_* keys), not on this screen.')
+                        ->schema([
+                            \Filament\Forms\Components\Placeholder::make($f('return_url'))
+                                ->label('Return URL (sent to the bank with every order)')
+                                ->content(rtrim((string) config('app.url'), '/').'/payment/'.$slug.'/return')
+                                ->columnSpanFull(),
+                            \Filament\Forms\Components\Placeholder::make($f('callback_url'))
+                                ->label('Callback URL (give to the bank if they offer notifications)')
+                                ->content(rtrim((string) config('app.url'), '/').'/payment/'.$slug.'/callback')
+                                ->columnSpanFull(),
+                        ]);
+
+                    continue;
+                }
+
                 // Every field names the environment variable it corresponds
                 // to. With one bank that is a nicety; with ten it is the
                 // difference between reading this screen and guessing, because
@@ -867,6 +890,11 @@ class Settings extends Page implements HasForms
             $incomplete = [];
 
             foreach ($manager->all() as $slug => $gateway) {
+                // Not edited on this screen; see the section built above.
+                if (! $gateway instanceof \App\Services\Payments\FabricGateway) {
+                    continue;
+                }
+
                 $envPrefix = config("payments.gateways.{$slug}.env_prefix", strtoupper($slug));
 
                 $values = [];

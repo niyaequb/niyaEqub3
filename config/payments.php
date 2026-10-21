@@ -1,6 +1,7 @@
 <?php
 
 use App\Services\Payments\Gateways\DashenGateway;
+use App\Services\Payments\Gateways\NpgGateway;
 
 return [
 
@@ -69,6 +70,29 @@ return [
                 'x-api-signature',
                 'x-signature',
             ],
+        ],
+
+        /*
+        | EthSwitch National Payment Gateway (NPG): card payments.
+        |
+        | A hosted checkout, not a super-app: the member opens the card page
+        | EthSwitch returns, and is sent back to /payment/npg/return. Settings
+        | are NPG_BASE_URL, NPG_USERNAME, NPG_PASSWORD and friends, read from
+        | the settings table first and .env second (EnvService). See NpgGateway.
+        |
+        | `listed_setting` keeps it out of the apps' bank picker until the
+        | apps can open a web checkout. Payments can still be made through the
+        | API and `php artisan npg:test` while it is off.
+        */
+        'npg' => [
+            'class' => NpgGateway::class,
+            'name' => 'Card (EthSwitch)',
+            'env_prefix' => 'NPG',
+            'client' => [
+                'kind' => 'web_checkout',
+            ],
+            'listed_setting' => 'NPG_SHOW_IN_APPS',
+            'signature_headers' => ['x-npg-signature'],
         ],
 
         /*

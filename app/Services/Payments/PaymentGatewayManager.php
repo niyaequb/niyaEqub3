@@ -170,7 +170,29 @@ class PaymentGatewayManager
             fn (PaymentGateway $g): array => $g->clientConfig() + [
                 'can_verify_settlement' => $g->canVerifySettlement(),
             ],
-            $this->enabled()
+            array_filter(
+                $this->enabled(),
+                fn (PaymentGateway $g, string $slug): bool => $this->isListed($slug),
+                ARRAY_FILTER_USE_BOTH
+            )
         ));
+    }
+
+    /**
+     * Whether the apps should offer this bank in their picker.
+     *
+     * Separate from isConfigured(): a bank can be ready to take money through
+     * the API before the apps know how to present it. A gateway whose config
+     * names a `listed_setting` is shown only once that setting is true.
+     */
+    public function isListed(string $slug): bool
+    {
+        $key = config("payments.gateways.{$slug}.listed_setting");
+
+        if (! $key) {
+            return true;
+        }
+
+        return filter_var($this->env->get((string) $key, 'false'), FILTER_VALIDATE_BOOL);
     }
 }

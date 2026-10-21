@@ -20,6 +20,9 @@ enum EqubPaymentMethod: string
     // ----- Banks -------------------------------------------------------
     case Dashen = 'dashen';
 
+    // EthSwitch National Payment Gateway: card payments on a hosted checkout.
+    case Npg = 'npg';
+
     // ----- Retired -----------------------------------------------------
 
     /**

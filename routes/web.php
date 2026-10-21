@@ -69,6 +69,23 @@ Route::post('/payment/{provider}/notification', [MemberEqubPaymentController::cl
     ->name('payment.notification');
 
 /*
+| Hosted checkouts (EthSwitch NPG). `return` is where the member's browser
+| lands after the card page; `callback` is for a server-to-server ping. Both
+| only make us ASK the bank. Nothing is settled on what the request says.
+*/
+Route::match(['get', 'post'], '/payment/{provider}/return', [\App\Http\Controllers\PaymentReturnController::class, 'customerReturn'])
+    ->where('provider', '[a-z0-9_]+')
+    ->withoutMiddleware([VerifyCsrfToken::class])
+    ->middleware('throttle:60,1')
+    ->name('payment.return');
+
+Route::match(['get', 'post'], '/payment/{provider}/callback', [\App\Http\Controllers\PaymentReturnController::class, 'callback'])
+    ->where('provider', '[a-z0-9_]+')
+    ->withoutMiddleware([VerifyCsrfToken::class])
+    ->middleware('throttle:120,1')
+    ->name('payment.callback');
+
+/*
 |--------------------------------------------------------------------------
 | Equb report printing
 |--------------------------------------------------------------------------
