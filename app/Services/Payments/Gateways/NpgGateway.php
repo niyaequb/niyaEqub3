@@ -7,7 +7,6 @@ use App\Contracts\PaymentGateway;
 use App\Models\PaymentGatewayOrder;
 use App\Services\EnvService;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -171,6 +170,13 @@ class NpgGateway implements HandlesCustomerReturn, PaymentGateway
     /**
      * POST to EthSwitch.
      *
+     * PLAIN PHP CURL, NOT Http:: (Guzzle). EthSwitch's server sends response
+     * headers Guzzle refuses to parse ("An error was encountered while
+     * creating the response"), so every call failed before the body could be
+     * read, although curl on the same server got a perfectly good answer.
+     * The body is wrapped in a header-less PSR-7 response so the rest of this
+     * class keeps using json(), successful() and status() as before.
+     *
      * Form-encoded body by default, which is what their Merchant API
      * recommends so the password does not end up in URL logs. Their own
      * Postman collection sends the same fields in the query string instead;
@@ -180,22 +186,45 @@ class NpgGateway implements HandlesCustomerReturn, PaymentGateway
      */
     protected function call(string $url, array $params): \Illuminate\Http\Client\Response
     {
-        $request = Http::withHeaders([
-            // Required by the Merchant API on every web API request.
-            'Accept' => 'application/json, text/javascript, */*',
-        ])->timeout((int) $this->setting('TIMEOUT_SECONDS', '30') ?: 30);
+        $query = strtolower((string) $this->setting('REQUEST_STYLE', 'form')) === 'query';
+
+        $handle = curl_init($query ? $url.'?'.http_build_query($params) : $url);
+
+        curl_setopt_array($handle, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => $query ? '' : http_build_query($params),
+            CURLOPT_HTTPHEADER => [
+                // Required by the Merchant API on every web API request.
+                'Accept: application/json, text/javascript, */*',
+                'Content-Type: application/x-www-form-urlencoded',
+            ],
+            CURLOPT_CONNECTTIMEOUT => 15,
+            CURLOPT_TIMEOUT => max(5, (int) $this->setting('TIMEOUT_SECONDS', '30')),
+        ]);
 
         // Only for a UAT host whose certificate the server cannot validate.
         // Never set this in production.
         if (filter_var($this->setting('INSECURE_SKIP_TLS_VERIFY', 'false'), FILTER_VALIDATE_BOOL)) {
-            $request = $request->withoutVerifying();
+            curl_setopt($handle, CURLOPT_SSL_VERIFYPEER, false);
+            curl_setopt($handle, CURLOPT_SSL_VERIFYHOST, 0);
         }
 
-        if (strtolower((string) $this->setting('REQUEST_STYLE', 'form')) === 'query') {
-            return $request->post($url.'?'.http_build_query($params));
+        $body = curl_exec($handle);
+
+        if ($body === false) {
+            $error = curl_error($handle);
+            curl_close($handle);
+
+            throw new \RuntimeException('cURL error talking to EthSwitch: '.$error);
         }
 
-        return $request->asForm()->post($url, $params);
+        $status = (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
+        curl_close($handle);
+
+        return new \Illuminate\Http\Client\Response(
+            new \GuzzleHttp\Psr7\Response($status, ['Content-Type' => 'application/json'], (string) $body)
+        );
     }
 
     /**
