@@ -303,6 +303,14 @@ class NpgGateway implements HandlesCustomerReturn, PaymentGateway
             $params['sessionTimeoutSecs'] = $timeout;
         }
 
+        // Which of EthSwitch's page layouts to show. MOBILE asks for their
+        // phone layout, which only works if EthSwitch have set one up for this
+        // merchant, so set NPG_PAGE_VIEW only once they confirm it. Sent as
+        // written: a custom page prefix is case-sensitive.
+        if (($pageView = (string) $this->setting('PAGE_VIEW')) !== '') {
+            $params['pageView'] = $pageView;
+        }
+
         try {
             $response = $this->call($this->endpoint('REGISTER_PATH', 'register.do'), $params);
         } catch (\Throwable $e) {
