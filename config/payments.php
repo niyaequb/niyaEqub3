@@ -61,6 +61,11 @@ return [
                 'bridge' => 'dashenbanksuperapp',
             ],
 
+            // Which apps offer this bank. 'miniapp' is the Niya mini app inside
+            // the Dashen SuperApp, and every client that does not say which it
+            // is (older mobile builds included), so their list never changes.
+            'channels' => ['miniapp'],
+
             // Headers the bank may sign its settlement notification with. All
             // are tried; the first one present is checked. Listing more than
             // one costs nothing and saves an outage when a bank quietly
@@ -80,17 +85,23 @@ return [
         | are NPG_BASE_URL, NPG_USERNAME, NPG_PASSWORD and friends, read from
         | the settings table first and .env second (EnvService). See NpgGateway.
         |
-        | `listed_setting` keeps it out of the apps' bank picker until the
-        | apps can open a web checkout. Payments can still be made through the
-        | API and `php artisan npg:test` while it is off.
+        | Offered to the mobile app only (`channels`): the mini app pays
+        | inside the Dashen SuperApp and never sees it. Settled into the same
+        | Dashen Bank account, with Dashen as EthSwitch acquirer.
+        |
+        | `listed_setting` is the switch for who may use it:
+        |   NPG_SHOW_IN_APPS=false    nobody (php artisan npg:test still works)
+        |   NPG_SHOW_IN_APPS=testers  only the phones in NPG_TEST_PHONES
+        |   NPG_SHOW_IN_APPS=true     every mobile member
         */
         'npg' => [
             'class' => NpgGateway::class,
-            'name' => 'Card (EthSwitch)',
+            'name' => 'EthSwitch card (Dashen Bank)',
             'env_prefix' => 'NPG',
             'client' => [
                 'kind' => 'web_checkout',
             ],
+            'channels' => ['mobile'],
             'listed_setting' => 'NPG_SHOW_IN_APPS',
             'signature_headers' => ['x-npg-signature'],
         ],

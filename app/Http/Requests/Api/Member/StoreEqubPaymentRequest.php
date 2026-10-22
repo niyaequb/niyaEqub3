@@ -33,7 +33,9 @@ class StoreEqubPaymentRequest extends FormRequest
             // going to be asked for the money.
             'payment_method' => [
                 'required',
-                Rule::in(app(PaymentGatewayManager::class)->acceptedMethods()),
+                // ...and only those open to THIS member: a bank switched on for
+                // testers is refused to everyone else here as well.
+                Rule::in(app(PaymentGatewayManager::class)->acceptedMethodsFor($this->user())),
             ],
 
             // Who the bank's host app says is using it, when the mini app was
@@ -56,7 +58,7 @@ class StoreEqubPaymentRequest extends FormRequest
      */
     public function messages(): array
     {
-        $accepted = app(PaymentGatewayManager::class)->acceptedMethods();
+        $accepted = app(PaymentGatewayManager::class)->acceptedMethodsFor($this->user());
 
         // Two very different faults reject a payment method here, and they need
         // opposite fixes, so the message has to tell them apart. "That payment

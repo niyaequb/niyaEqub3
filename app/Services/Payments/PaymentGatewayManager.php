@@ -160,39 +160,132 @@ class PaymentGatewayManager
     }
 
     /**
-     * What the apps need in order to draw a bank picker and present an order.
+     * Payment methods THIS member may submit.
      *
-     * @return array<int, array<string, mixed>>
+     * acceptedMethods() narrowed by each gateway's `listed_setting`, so a bank
+     * switched on for testers only cannot be paid through by anyone else, even
+     * by calling the API directly. Banks without the setting are open to all,
+     * which is how Dashen has always behaved.
+     *
+     * @return array<int, string>
      */
-    public function clientCatalogue(): array
+    public function acceptedMethodsFor(mixed $user = null): array
     {
-        return array_values(array_map(
-            fn (PaymentGateway $g): array => $g->clientConfig() + [
-                'can_verify_settlement' => $g->canVerifySettlement(),
-            ],
-            array_filter(
-                $this->enabled(),
-                fn (PaymentGateway $g, string $slug): bool => $this->isListed($slug),
-                ARRAY_FILTER_USE_BOTH
-            )
+        return array_values(array_filter(
+            $this->enabledSlugs(),
+            fn (string $slug): bool => $this->isAvailableTo($slug, $user)
         ));
     }
 
     /**
-     * Whether the apps should offer this bank in their picker.
+     * What the apps need in order to draw a bank picker and present an order.
      *
-     * Separate from isConfigured(): a bank can be ready to take money through
-     * the API before the apps know how to present it. A gateway whose config
-     * names a `listed_setting` is shown only once that setting is true.
+     * WHICH APP IS ASKING DECIDES THE LIST.
+     *
+     *   miniapp (the default)  banks paid inside a super-app: Dashen. Every
+     *                          client that does not say which it is gets this,
+     *                          so the mini app and older phone builds see
+     *                          exactly what they always saw.
+     *   mobile                 banks the phone app can pay through itself: the
+     *                          EthSwitch card checkout.
+     *
+     * A phone with no card gateway open to it (switched off, or a member who is
+     * not a tester yet) falls back to the super-app list. That is what it got
+     * before, and the app presents it as "pay in the Dashen app".
+     *
+     * @return array<int, array<string, mixed>>
      */
+    public function clientCatalogue(?string $channel = null, mixed $viewer = null): array
+    {
+        $channel = $channel === 'mobile' ? 'mobile' : 'miniapp';
+
+        $pick = fn (string $wanted): array => array_filter(
+            $this->enabled(),
+            fn (PaymentGateway $g, string $slug): bool => in_array($wanted, $this->channelsOf($slug), true)
+                && $this->isAvailableTo($slug, $viewer),
+            ARRAY_FILTER_USE_BOTH
+        );
+
+        $gateways = $pick($channel);
+
+        if ($gateways === [] && $channel === 'mobile') {
+            $gateways = $pick('miniapp');
+        }
+
+        return array_values(array_map(
+            fn (PaymentGateway $g): array => $g->clientConfig() + [
+                'can_verify_settlement' => $g->canVerifySettlement(),
+            ],
+            $gateways
+        ));
+    }
+
+    /** @return array<int, string> */
+    protected function channelsOf(string $slug): array
+    {
+        $channels = config("payments.gateways.{$slug}.channels");
+
+        return is_array($channels) && $channels !== [] ? array_values($channels) : ['miniapp'];
+    }
+
+    /** Whether every member may use this bank (no tester restriction). */
     public function isListed(string $slug): bool
+    {
+        return $this->listingMode($slug) === 'all';
+    }
+
+    /**
+     * Whether this member may use this bank.
+     *
+     * The gateway's `listed_setting` reads false, testers or true. With
+     * testers, only phones in {PREFIX}_TEST_PHONES qualify, matched on their
+     * last nine digits so +2519..., 2519... and 09... are the same number.
+     */
+    public function isAvailableTo(string $slug, mixed $user = null): bool
+    {
+        return match ($this->listingMode($slug)) {
+            'all' => true,
+            'testers' => $user !== null && $this->isTester($slug, (string) ($user->phone ?? '')),
+            default => false,
+        };
+    }
+
+    /** @return 'all'|'testers'|'none' */
+    protected function listingMode(string $slug): string
     {
         $key = config("payments.gateways.{$slug}.listed_setting");
 
         if (! $key) {
-            return true;
+            return 'all';
         }
 
-        return filter_var($this->env->get((string) $key, 'false'), FILTER_VALIDATE_BOOL);
+        $value = strtolower(trim((string) $this->env->get((string) $key, 'false')));
+
+        return match (true) {
+            in_array($value, ['1', 'true', 'yes', 'on', 'all'], true) => 'all',
+            $value === 'testers' => 'testers',
+            default => 'none',
+        };
+    }
+
+    protected function isTester(string $slug, string $phone): bool
+    {
+        $lastNine = fn (string $value): string => substr((string) preg_replace('/\D+/', '', $value), -9);
+
+        $mine = $lastNine($phone);
+
+        if (strlen($mine) < 9) {
+            return false;
+        }
+
+        $prefix = strtoupper((string) config("payments.gateways.{$slug}.env_prefix", $slug));
+
+        foreach (explode(',', (string) $this->env->get($prefix.'_TEST_PHONES', '')) as $listed) {
+            if ($lastNine($listed) === $mine) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

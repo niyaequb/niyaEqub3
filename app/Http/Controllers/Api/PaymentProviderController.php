@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Services\Payments\PaymentGatewayManager;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Tymon\JWTAuth\Facades\JWTAuth;
 
 /**
  * Which banks a member can pay through.
@@ -36,9 +38,16 @@ class PaymentProviderController extends Controller
     /**
      * List the banks available for payment.
      */
-    public function index(PaymentGatewayManager $gateways): JsonResponse
+    public function index(Request $request, PaymentGatewayManager $gateways): JsonResponse
     {
-        $providers = $gateways->clientCatalogue();
+        // `channel=mobile` is sent by the phone app; anything else, or nothing,
+        // is the mini app and gets the list it has always had.
+        $channel = $request->query('channel') === 'mobile' ? 'mobile' : null;
+
+        $providers = $gateways->clientCatalogue(
+            $channel,
+            $channel === 'mobile' ? $this->viewer() : null,
+        );
 
         return response()->json([
             'status' => 'success',
@@ -53,5 +62,21 @@ class PaymentProviderController extends Controller
                 'count' => count($providers),
             ],
         ]);
+    }
+
+    /**
+     * The signed-in member, if the request carries a valid token.
+     *
+     * Optional on purpose: this route is public. It only matters when a bank
+     * is switched on for testers, and a missing or expired token simply means
+     * "not a tester". Never throws.
+     */
+    protected function viewer(): mixed
+    {
+        try {
+            return JWTAuth::getToken() ? (JWTAuth::parseToken()->authenticate() ?: null) : null;
+        } catch (\Throwable) {
+            return null;
+        }
     }
 }

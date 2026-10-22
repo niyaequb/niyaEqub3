@@ -661,7 +661,8 @@ class EqubPaymentController extends Controller
         }
 
         $gateways = app(PaymentGatewayManager::class);
-        $accepted = $gateways->acceptedMethods();
+        // Only banks open to this member; see acceptedMethodsFor().
+        $accepted = $gateways->acceptedMethodsFor($request->user());
 
         $data = $request->validate([
             'equb_membership_ids' => ['required', 'array', 'min:1', 'max:20'],
