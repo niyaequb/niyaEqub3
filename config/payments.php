@@ -89,10 +89,11 @@ return [
         | inside the Dashen SuperApp and never sees it. Settled into the same
         | Dashen Bank account, with Dashen as EthSwitch acquirer.
         |
-        | `listed_setting` is the switch for who may use it:
-        |   NPG_SHOW_IN_APPS=false    nobody (php artisan npg:test still works)
-        |   NPG_SHOW_IN_APPS=testers  only the phones in NPG_TEST_PHONES
-        |   NPG_SHOW_IN_APPS=true     every mobile member
+        | `listed_setting` is the off-switch. It is ON unless set to false:
+        |   NPG_SHOW_IN_APPS=false    hidden from the phone app, which falls
+        |                             back to the Dashen sheet (npg:test still
+        |                             works)
+        |   anything else, or unset   offered to the phone app
         */
         'npg' => [
             'class' => NpgGateway::class,

@@ -160,12 +160,11 @@ class PaymentGatewayManager
     }
 
     /**
-     * Payment methods THIS member may submit.
+     * Payment methods a member may submit.
      *
-     * acceptedMethods() narrowed by each gateway's `listed_setting`, so a bank
-     * switched on for testers only cannot be paid through by anyone else, even
-     * by calling the API directly. Banks without the setting are open to all,
-     * which is how Dashen has always behaved.
+     * acceptedMethods() minus any bank that has been switched off for members
+     * (see isListed()). The member is passed so a per-member rule can be added
+     * here later without touching the callers; nothing narrows on it today.
      *
      * @return array<int, string>
      */
@@ -173,7 +172,7 @@ class PaymentGatewayManager
     {
         return array_values(array_filter(
             $this->enabledSlugs(),
-            fn (string $slug): bool => $this->isAvailableTo($slug, $user)
+            fn (string $slug): bool => $this->isListed($slug)
         ));
     }
 
@@ -187,22 +186,23 @@ class PaymentGatewayManager
      *                          so the mini app and older phone builds see
      *                          exactly what they always saw.
      *   mobile                 banks the phone app can pay through itself: the
-     *                          EthSwitch card checkout.
+     *                          EthSwitch card checkout. Only the new phone
+     *                          build sends channel=mobile.
      *
-     * A phone with no card gateway open to it (switched off, or a member who is
-     * not a tester yet) falls back to the super-app list. That is what it got
-     * before, and the app presents it as "pay in the Dashen app".
+     * A phone with no card gateway available (not configured, or switched off)
+     * falls back to the super-app list. That is what it got before, and the app
+     * presents it as "pay in the Dashen app".
      *
      * @return array<int, array<string, mixed>>
      */
-    public function clientCatalogue(?string $channel = null, mixed $viewer = null): array
+    public function clientCatalogue(?string $channel = null): array
     {
         $channel = $channel === 'mobile' ? 'mobile' : 'miniapp';
 
         $pick = fn (string $wanted): array => array_filter(
             $this->enabled(),
             fn (PaymentGateway $g, string $slug): bool => in_array($wanted, $this->channelsOf($slug), true)
-                && $this->isAvailableTo($slug, $viewer),
+                && $this->isListed($slug),
             ARRAY_FILTER_USE_BOTH
         );
 
@@ -228,64 +228,29 @@ class PaymentGatewayManager
         return is_array($channels) && $channels !== [] ? array_values($channels) : ['miniapp'];
     }
 
-    /** Whether every member may use this bank (no tester restriction). */
-    public function isListed(string $slug): bool
-    {
-        return $this->listingMode($slug) === 'all';
-    }
-
     /**
-     * Whether this member may use this bank.
+     * Whether members may use this bank.
      *
-     * The gateway's `listed_setting` reads false, testers or true. With
-     * testers, only phones in {PREFIX}_TEST_PHONES qualify, matched on their
-     * last nine digits so +2519..., 2519... and 09... are the same number.
+     * ON unless it has been switched off: the gateway's `listed_setting`
+     * (NPG_SHOW_IN_APPS for EthSwitch) set to false, off, no or 0. Any other
+     * value, or none at all, is on.
+     *
+     * There is deliberately no "testers only" mode any more. It needed a
+     * correctly typed phone list on the server, and a placeholder left in that
+     * list silently hid the bank from everyone. The gate that keeps a bank away
+     * from members who should not see it is `channels`: EthSwitch is offered
+     * on the mobile channel only, and only the new phone build asks for it.
      */
-    public function isAvailableTo(string $slug, mixed $user = null): bool
-    {
-        return match ($this->listingMode($slug)) {
-            'all' => true,
-            'testers' => $user !== null && $this->isTester($slug, (string) ($user->phone ?? '')),
-            default => false,
-        };
-    }
-
-    /** @return 'all'|'testers'|'none' */
-    protected function listingMode(string $slug): string
+    public function isListed(string $slug): bool
     {
         $key = config("payments.gateways.{$slug}.listed_setting");
 
         if (! $key) {
-            return 'all';
+            return true;
         }
 
-        $value = strtolower(trim((string) $this->env->get((string) $key, 'false')));
+        $value = strtolower(trim((string) $this->env->get((string) $key, '')));
 
-        return match (true) {
-            in_array($value, ['1', 'true', 'yes', 'on', 'all'], true) => 'all',
-            $value === 'testers' => 'testers',
-            default => 'none',
-        };
-    }
-
-    protected function isTester(string $slug, string $phone): bool
-    {
-        $lastNine = fn (string $value): string => substr((string) preg_replace('/\D+/', '', $value), -9);
-
-        $mine = $lastNine($phone);
-
-        if (strlen($mine) < 9) {
-            return false;
-        }
-
-        $prefix = strtoupper((string) config("payments.gateways.{$slug}.env_prefix", $slug));
-
-        foreach (explode(',', (string) $this->env->get($prefix.'_TEST_PHONES', '')) as $listed) {
-            if ($lastNine($listed) === $mine) {
-                return true;
-            }
-        }
-
-        return false;
+        return ! in_array($value, ['0', 'false', 'no', 'off'], true);
     }
 }
