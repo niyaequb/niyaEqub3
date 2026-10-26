@@ -397,6 +397,37 @@ class NpgGateway implements HandlesCustomerReturn, PaymentGateway
         return [];
     }
 
+    /**
+     * One raw EPG request, for the npg:test acceptance tests only (refund.do,
+     * registerPreAuth.do, deposit.do, getOrderStatus.do by orderId). Nothing
+     * in the payment flow calls this. $wrongPassword sends a deliberately
+     * wrong password, for the "access denied" test case.
+     *
+     * @param  array<string, scalar>  $params
+     * @return array{http: int, body: array<string, mixed>|string}
+     */
+    public function testRequest(string $path, array $params, bool $wrongPassword = false): array
+    {
+        $credentials = $this->credentials();
+
+        if ($wrongPassword) {
+            $credentials['password'] = 'wrong-'.bin2hex(random_bytes(4));
+        }
+
+        $response = $this->call($this->endpoint(strtoupper(str_replace('.do', '', $path)).'_PATH', $path), $credentials + $params);
+
+        return [
+            'http' => $response->status(),
+            'body' => $response->json() ?? $response->body(),
+        ];
+    }
+
+    /** Amount and currency used by the acceptance tests. */
+    public function currencyCode(): string
+    {
+        return $this->currency();
+    }
+
     // ---------------------------------------------------------------------
     // Settlement
     // ---------------------------------------------------------------------
