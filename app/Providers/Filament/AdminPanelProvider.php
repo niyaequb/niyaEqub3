@@ -29,6 +29,7 @@ class AdminPanelProvider extends PanelProvider
             ->id('admin')
             ->path('admin')
             ->login()
+            ->profile(\App\Filament\Pages\Auth\EditProfile::class, isSimple: false)
             ->maxContentWidth(Width::Full)
             ->colors([
                 'primary' => Color::Amber,
@@ -59,6 +60,9 @@ class AdminPanelProvider extends PanelProvider
             ->authMiddleware([
                 Authenticate::class,
             ])->userMenuItems([
+                'profile' => fn (\Filament\Actions\Action $action) => $action
+                    ->label('My Profile')
+                    ->icon('heroicon-o-user-circle'),
                 \Filament\Navigation\MenuItem::make()
                     ->label(fn () => app()->getLocale() === 'en' ? 'አማ' : 'Eng')
                     ->icon('heroicon-o-language')
