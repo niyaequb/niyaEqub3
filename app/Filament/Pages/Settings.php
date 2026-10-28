@@ -804,11 +804,15 @@ class Settings extends Page implements HasForms
                     TextInput::make('social_instagram')
                         ->label('Instagram'),
                     TextInput::make('social_youtube')
-                        ->label('YouTube'),
-                    TextInput::make('social_twitter')
-                        ->label('Twitter (X)'),
-                    TextInput::make('social_linkedin')
-                        ->label('LinkedIn'),
+                        ->label('YouTube')
+                        ->placeholder('https://www.youtube.com/@niyaequb'),
+                    TextInput::make('social_whatsapp')
+                        ->label('WhatsApp')
+                        ->placeholder('https://wa.me/2519XXXXXXXX')
+                        ->helperText('A full link, or just the phone number (e.g. 251984949956).'),
+                    TextInput::make('social_facebook')
+                        ->label('Facebook')
+                        ->placeholder('https://www.facebook.com/niyaequb'),
                 ])
                 ->columns(2);
         }

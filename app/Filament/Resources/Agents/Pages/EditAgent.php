@@ -27,6 +27,7 @@ class EditAgent extends EditRecord
                 'name' => $user->name,
                 'phone' => $user->phone,
                 'email' => $user->email,
+                'city' => $user->city,
             ];
         }
 
@@ -37,9 +38,7 @@ class EditAgent extends EditRecord
     {
         return [
             DeleteAction::make()
-                ->action(function (Agent $record): void {
-                    $record->user?->delete();
-                }),
+                ->modalDescription('This removes the agent, their login, commissions and payout history. Members they referred are kept and simply unlinked.'),
         ];
     }
 
@@ -55,8 +54,13 @@ class EditAgent extends EditRecord
         if ($userData !== []) {
             $userPayload = [
                 'name' => $userData['name'] ?? $record->user?->name,
-                'phone' => $userData['phone'] ?? $record->user?->phone,
-                'email' => $userData['email'] ?? $record->user?->email,
+                'phone' => filled($userData['phone'] ?? null)
+                    ? CreateAgent::formatPhone($userData['phone'])
+                    : $record->user?->phone,
+                'email' => filled($userData['email'] ?? null) ? $userData['email'] : null,
+                'city' => $userData['city'] ?? $record->user?->city,
+                // An agent managed by an admin is always allowed to log in.
+                'phone_verified_at' => $record->user?->phone_verified_at ?? now(),
             ];
 
             if (array_key_exists('password', $userData) && filled($userData['password'])) {

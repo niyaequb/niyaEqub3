@@ -66,21 +66,28 @@ class UserController extends Controller
 
                 if (! empty($userData)) {
                     $user->update($userData);
+                }
 
-                    // if user is agent update agent profile
-                    if ($user->isAgent()) {
-                        $user->agentProfile()->update([
-                            'bank_name' => $validatedData['bank_name'] ?? null,
-                            'account_number' => $validatedData['account_number'] ?? null,
-                            'account_holder_name' => $validatedData['account_holder_name'] ?? null,
-                        ]);
+                // Agent bank details are saved on their own. They used to be
+                // saved only when a name/email/city also changed, and any field
+                // not sent was wiped to null, so editing just the bank details
+                // silently did nothing and payouts stayed blocked.
+                if ($user->isAgent() && $user->agentProfile) {
+                    $bank = array_intersect_key(
+                        $validatedData,
+                        array_flip(['bank_name', 'account_number', 'account_holder_name'])
+                    );
+
+                    if ($bank !== []) {
+                        $user->agentProfile->update($bank);
                     }
                 }
 
             });
 
             // Reload user with relationships
-            $updatedUser = User::find($user->id);
+            // agentProfile included so the app keeps the saved bank details.
+            $updatedUser = User::with(['member', 'agentProfile'])->find($user->id);
 
             return response()->json([
                 'status' => 'success',

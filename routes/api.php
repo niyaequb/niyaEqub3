@@ -159,11 +159,15 @@ Route::middleware(['jwt.auth', 'active.user'])->group(function () {
 
     Route::prefix('agent')->middleware('agent.user')->group(function () {
         Route::get('dashboard', AgentDashboardController::class);
+        Route::get('analytics', \App\Http\Controllers\Api\Agent\AgentAnalyticsController::class);
+        Route::get('profile', [\App\Http\Controllers\Api\Agent\AgentProfileController::class, 'show']);
+        Route::post('profile', [\App\Http\Controllers\Api\Agent\AgentProfileController::class, 'update']);
         Route::get('members', [AgentMembersController::class, 'index']);
         Route::post('members', [AgentMembersController::class, 'store']);
         Route::get('payouts', [AgentPaymentsController::class, 'payout']);
         Route::get('payments', [AgentPaymentsController::class, 'index']);
         Route::post('payments', [AgentPaymentsController::class, 'store']);
+        Route::post('payments/{id}/cancel', [AgentPaymentsController::class, 'cancel'])->whereNumber('id');
         Route::get('commissions', [AgentCommissionsController::class, 'index']);
     });
 

@@ -22,13 +22,16 @@ class CreateAgent extends CreateRecord
         $userData = $data['user'] ?? [];
         $agentData = Arr::except($data, ['user']);
 
+        // Created by an admin, so the phone is trusted: mark it verified,
+        // otherwise the agent app refuses to log in ("Phone number not verified").
         $user = User::create([
             'name' => $userData['name'],
-            'phone' => $userData['phone'],
-            'email' => $userData['email'] ?? null,
+            'phone' => self::formatPhone($userData['phone']),
+            'email' => filled($userData['email'] ?? null) ? $userData['email'] : null,
+            'city' => $userData['city'] ?? null,
             'password' => Hash::make($userData['password']),
             'type' => 'agent',
-            'phone_verified_at' => null,
+            'phone_verified_at' => now(),
             'is_active' => true,
         ]);
 
@@ -46,6 +49,51 @@ class CreateAgent extends CreateRecord
             'account_holder_name' => $agentData['account_holder_name'] ?? null,
             'joined_at' => now(),
         ]);
+    }
+
+    protected function getRedirectUrl(): string
+    {
+        return $this->getResource()::getUrl('view', ['record' => $this->getRecord()]);
+    }
+
+    protected function getCreatedNotificationTitle(): ?string
+    {
+        return 'Agent created. They can log in to the agent app right away with this phone and password.';
+    }
+
+    /**
+     * Same format the apps use (+2519XXXXXXXX), so the agent can log in
+     * whether the admin typed 09..., 9... or +2519...
+     */
+    public static function formatPhone(string $number): string
+    {
+        $number = preg_replace('/\D/', '', $number);
+        $number = ltrim($number, '0');
+
+        if (! str_starts_with($number, '251')) {
+            $number = '251'.$number;
+        }
+
+        return '+'.$number;
+    }
+
+    protected function mutateFormDataBeforeCreate(array $data): array
+    {
+        if (filled($data['user']['phone'] ?? null)) {
+            $phone = self::formatPhone($data['user']['phone']);
+
+            if (User::query()->where('phone', $phone)->exists()) {
+                \Filament\Notifications\Notification::make()
+                    ->danger()
+                    ->title('This phone number is already registered.')
+                    ->body('Use a different number, or delete the old account first.')
+                    ->send();
+
+                $this->halt();
+            }
+        }
+
+        return $data;
     }
 
     private function generateReferralCode(): string

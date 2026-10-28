@@ -41,34 +41,44 @@ class EditUser extends EditRecord
 
     protected function handleRecordUpdate($record, array $data): User
     {
-        // Block editing Super Admin
-        if ($record->hasRole('Super Admin')) {
+        // Only a Super Admin may change a Super Admin account.
+        if ($record->hasRole('Super Admin') && ! Auth::user()?->hasRole('Super Admin')) {
             Notification::make()
-                ->title('Cannot edit Super Admin user.')
+                ->title('Only a Super Admin can edit this account.')
                 ->danger()
                 ->send();
-            $this->getRedirectUrl();
+
+            $this->halt();
         }
 
-        if (! empty($data['password'])) {
-            $data['password'] = Hash::make($data['password']);
-        } else {
-            unset($data['password']);
-        }
+        // Keep the original verification date when the toggle stays on.
+        $phoneVerifiedAt = ! empty($data['phone_verified_at'])
+            ? ($record->phone_verified_at ?? now())
+            : null;
 
-        $record->update([
+        $updates = [
             'name' => $data['name'],
             'phone' => $data['phone'],
             'email' => $data['email'] ?? null,
+            'city' => $data['city'] ?? $record->city,
+            'referral_code' => $data['referral_code'] ?? $record->referral_code,
             'type' => $data['type'],
             'is_active' => $data['is_active'] ?? false,
-            'email_verified_at' => ! empty($data['email_verified_at']) ? now() : null,
-            'phone_verified_at' => ! empty($data['phone_verified_at']) ? now() : null,
+            'phone_verified_at' => $phoneVerifiedAt,
             'profile_picture' => $data['profile_picture'] ?? $record->profile_picture,
-            ...(! empty($data['password']) ? [
-                'password' => $data['password'],
-            ] : []),
-        ]);
+        ];
+
+        // Never lock a Super Admin out by deactivating or demoting them.
+        if ($record->hasRole('Super Admin')) {
+            $updates['is_active'] = true;
+        }
+
+        if (! empty($data['password'])) {
+            // The model casts password as 'hashed', so pass it plain.
+            $updates['password'] = $data['password'];
+        }
+
+        $record->update($updates);
 
         return $record;
     }

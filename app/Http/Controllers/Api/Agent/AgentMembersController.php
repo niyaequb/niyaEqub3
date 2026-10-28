@@ -34,11 +34,22 @@ class AgentMembersController extends Controller
             );
         }
 
-        $members = $agent
+        $query = $agent
             ->members()
             ->with(['user', 'agent'])
-            ->latest()
-            ->paginate($request->integer('per_page', 15));
+            ->withCount(['equbMemberships as active_equbs_count' => fn ($q) => $q->where('status', 'active')])
+            ->latest();
+
+        if ($request->filled('search')) {
+            $term = '%'.trim($request->string('search')->toString()).'%';
+            $query->where(fn ($q) => $q
+                ->where('full_name', 'like', $term)
+                ->orWhereHas('user', fn ($u) => $u->where('phone', 'like', $term)));
+        }
+
+        // Up to 500 per page so the app can show an agent's whole list.
+        $perPage = max(1, min(500, $request->integer('per_page', 15)));
+        $members = $query->paginate($perPage);
 
         return response()->json([
             'status' => 'success',
@@ -73,7 +84,9 @@ class AgentMembersController extends Controller
                 'phone' => $request->input('phone'),
                 'password' => Hash::make($password),
                 'type' => 'member',
-                'phone_verified_at' => null,
+                // Registered in person by a trusted agent, who receives the
+                // SMS credentials for them: they must be able to log in.
+                'phone_verified_at' => now(),
                 'is_active' => true,
             ]);
 

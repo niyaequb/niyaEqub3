@@ -21,6 +21,12 @@ class AgentPaymentRequestsTable
                 TextColumn::make('id')
                     ->label('ID')
                     ->sortable(),
+                TextColumn::make('reference')
+                    ->label('Reference')
+                    ->copyable()
+                    ->searchable()
+                    ->placeholder('-')
+                    ->weight('bold'),
                 TextColumn::make('agent.user.name')
                     ->label('Agent')
                     ->getStateUsing(fn (AgentPaymentRequest $record): ?string => $record->agent?->user?->name)
@@ -33,7 +39,14 @@ class AgentPaymentRequestsTable
                 TextColumn::make('amount')
                     ->label('Amount')
                     ->numeric(decimalPlaces: 2)
+                    ->suffix(' ETB')
+                    ->weight('bold')
                     ->sortable(),
+                TextColumn::make('account_number')
+                    ->label('Account No.')
+                    ->placeholder('-')
+                    ->copyable()
+                    ->toggleable(),
                 TextColumn::make('bank_name')
                     ->label('Bank')
                     ->placeholder('-')
@@ -47,7 +60,33 @@ class AgentPaymentRequestsTable
                 TextColumn::make('status')
                     ->label('Status')
                     ->badge()
+                    ->formatStateUsing(fn ($state, AgentPaymentRequest $record): string => $record->cancelled_at
+                        ? 'Cancelled'
+                        : ucfirst($state instanceof \BackedEnum ? $state->value : (string) $state))
+                    ->color(fn ($state, AgentPaymentRequest $record): string => $record->cancelled_at
+                        ? 'gray'
+                        : match ($state instanceof \BackedEnum ? $state->value : (string) $state) {
+                            'completed' => 'success',
+                            'pending' => 'warning',
+                            'failed' => 'danger',
+                            default => 'gray',
+                        })
                     ->sortable(),
+                TextColumn::make('note')
+                    ->label('Agent note')
+                    ->limit(30)
+                    ->placeholder('-')
+                    ->toggleable(),
+                TextColumn::make('transaction_reference')
+                    ->label('Transfer ref.')
+                    ->copyable()
+                    ->placeholder('-')
+                    ->toggleable(),
+                TextColumn::make('admin_note')
+                    ->label('Admin note')
+                    ->limit(30)
+                    ->placeholder('-')
+                    ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('paid_at')
                     ->label('Paid At')
                     ->dateTime()
@@ -80,11 +119,35 @@ class AgentPaymentRequestsTable
                         return  Auth::check() &&
                          ( Auth::user()->hasRole('Super Admin') || Auth::user()->can('agent-payment-requests.edit')) && $record->status !== PaymentStatus::Completed;
                     })
-                    ->action(function (AgentPaymentRequest $record): void {
+                    ->modalHeading(fn (AgentPaymentRequest $record): string => 'Pay '.($record->reference ?? '#'.$record->id))
+                    ->modalDescription(fn (AgentPaymentRequest $record): string => sprintf(
+                        'Confirm you sent ETB %s to %s (%s, %s).',
+                        number_format((float) $record->amount, 2),
+                        $record->account_holder_name ?: '—',
+                        $record->bank_name ?: '—',
+                        $record->account_number ?: '—'
+                    ))
+                    ->schema([
+                        \Filament\Forms\Components\TextInput::make('transaction_reference')
+                            ->label('Bank transfer reference')
+                            ->placeholder('e.g. FT26301XXXXX')
+                            ->maxLength(255),
+                        \Filament\Forms\Components\Textarea::make('admin_note')
+                            ->label('Note to the agent (optional)')
+                            ->rows(2)
+                            ->maxLength(500),
+                    ])
+                    ->action(function (AgentPaymentRequest $record, array $data): void {
                         $record->update([
                             'status' => PaymentStatus::Completed,
                             'paid_at' => now(),
+                            'cancelled_at' => null,
+                            'transaction_reference' => $data['transaction_reference'] ?? null,
+                            'admin_note' => $data['admin_note'] ?? $record->admin_note,
+                            'processed_by' => Auth::id(),
                         ]);
+                        \Filament\Notifications\Notification::make()->success()
+                            ->title('Marked as paid.')->send();
                     }),
                 Action::make('mark_failed')
                     ->label('Mark Failed')
@@ -94,10 +157,21 @@ class AgentPaymentRequestsTable
                         return  Auth::check() &&
                          ( Auth::user()->hasRole('Super Admin') || Auth::user()->can('agent-payment-requests.edit')) && $record->status !== PaymentStatus::Failed;
                     })
-                    ->action(function (AgentPaymentRequest $record): void {
+                    ->modalHeading('Reject this withdrawal')
+                    ->modalDescription('The amount goes back to the agent\'s available balance. The agent sees your reason in the app.')
+                    ->schema([
+                        \Filament\Forms\Components\Textarea::make('admin_note')
+                            ->label('Reason')
+                            ->required()
+                            ->rows(3)
+                            ->maxLength(500),
+                    ])
+                    ->action(function (AgentPaymentRequest $record, array $data): void {
                         $record->update([
                             'status' => PaymentStatus::Failed,
                             'paid_at' => null,
+                            'admin_note' => $data['admin_note'],
+                            'processed_by' => Auth::id(),
                         ]);
                     }),
             ])

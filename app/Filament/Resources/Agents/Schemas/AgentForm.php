@@ -24,6 +24,8 @@ class AgentForm
                             ->maxLength(255),
                         TextInput::make('user.phone')
                             ->label('Phone Number')
+                            ->tel()
+                            ->placeholder('+2519XXXXXXXX')
                             ->required()
                             ->maxLength(255)
                             ->rules(fn (?Agent $record): array => [
@@ -36,10 +38,18 @@ class AgentForm
                             ->rules(fn (?Agent $record): array => [
                                 Rule::unique('users', 'email')->ignore($record?->user_id),
                             ]),
+                        TextInput::make('user.city')
+                            ->label('City')
+                            ->maxLength(255),
                         TextInput::make('user.password')
                             ->label('Password')
                             ->password()
+                            ->revealable()
+                            ->minLength(6)
                             ->maxLength(255)
+                            ->helperText(fn (string $context): string => $context === 'create'
+                                ? 'The agent logs in to the agent app with this phone and password.'
+                                : 'Leave empty to keep the current password.')
                             ->dehydrated(fn ($state) => filled($state))
                             ->required(fn (string $context): bool => $context === 'create'),
                     ])
