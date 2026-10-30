@@ -17,11 +17,12 @@ class StorePaymentRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'amount' => ['required', 'numeric', 'min:1'],
+            'amount' => ['required', 'numeric', 'min:0.01', 'decimal:0,2'],
             'bank_name' => ['nullable', 'string', 'max:255'],
             'account_number' => ['nullable', 'string', 'max:50'],
             'account_holder_name' => ['nullable', 'string', 'max:255'],
             'status' => ['nullable', 'string', 'in:completed,pending,failed'],
+            'note' => ['nullable', 'string', 'max:500'],
             'paid_at' => ['nullable', 'date'],
         ];
     }
@@ -52,7 +53,8 @@ class StorePaymentRequest extends FormRequest
         return [
             'amount.required' => 'Payment amount is required.',
             'amount.numeric' => 'Payment amount must be a number.',
-            'amount.min' => 'Payment amount must be at least 1.',
+            'amount.min' => 'Payment amount must be greater than 0.',
+            'amount.decimal' => 'Use at most 2 decimal places.',
             'status.in' => 'Payment status is invalid.',
             'paid_at.date' => 'Paid at must be a valid date.',
         ];

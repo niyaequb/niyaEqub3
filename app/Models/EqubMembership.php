@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\Log;
 
 class EqubMembership extends Model
 {
-    protected $fillable = ['equb_group_id', 'member_id', 'role', 'invited_by_member_id', 'cohort_id', 'contribution_amount', 'contribution_frequency_days', 'join_date', 'calculated_end_date', 'draw_position', 'has_won', 'win_date', 'status', 'last_overdue_notified_at', 'sponsor_member_id', 'responsibility_name', 'responsibility_phone', 'responsibility_relation', 'responsibility_note', 'draw_blocked_until', 'draw_block_reason', 'fraud_flagged_at'];
+    protected $fillable = ['equb_group_id', 'member_id', 'role', 'invited_by_member_id', 'cohort_id', 'contribution_amount', 'contribution_frequency_days', 'join_date', 'calculated_end_date', 'draw_position', 'has_won', 'win_date', 'status', 'last_overdue_notified_at', 'sponsor_member_id', 'responsibility_name', 'responsibility_phone', 'responsibility_relation', 'responsibility_note', 'draw_blocked_until', 'draw_block_reason', 'fraud_flagged_at', 'termination_requested_at', 'called_at', 'called_by'];
 
     protected function casts(): array
     {
@@ -28,7 +28,36 @@ class EqubMembership extends Model
             // itself the moment the member catches up.
             'draw_blocked_until' => 'datetime',
             'fraud_flagged_at' => 'datetime',
+            'termination_requested_at' => 'datetime',
+            'called_at' => 'datetime',
         ];
+    }
+
+    /** Call Center: who marked this place as "Called". */
+    public function calledBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'called_by');
+    }
+
+    public function isCalled(): bool
+    {
+        return $this->called_at !== null;
+    }
+
+    /** Calls the call center has made about this place, newest first. */
+    public function callLogs(): HasMany
+    {
+        return $this->hasMany(CallCenterLog::class, 'equb_membership_id')->latest();
+    }
+
+    public function latestCallLog(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(CallCenterLog::class, 'equb_membership_id')->latestOfMany();
+    }
+
+    public function terminations(): HasMany
+    {
+        return $this->hasMany(EqubTermination::class, 'equb_membership_id')->latest();
     }
 
     public function equbGroup(): BelongsTo

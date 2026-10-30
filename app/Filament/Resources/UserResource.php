@@ -222,9 +222,7 @@ class UserResource extends Resource
                          ( Auth::user()->hasRole('Super Admin') || Auth::user()->can('users.index')))
                     ->label(__('filament.actions.view')),
                     EditAction::make()
-                    ->visible(fn (): bool =>
-                        Auth::check() &&
-                         ( Auth::user()->hasRole('Super Admin') || Auth::user()->can('users.edit')))
+                    ->visible(fn (User $record): bool => static::canEdit($record))
                     ->label(__('filament.actions.edit')),
                     Action::make('activate')
                         ->label('Activate')
@@ -339,13 +337,26 @@ class UserResource extends Resource
 
     public static function canEdit($record): bool
     {
+        if (! Auth::check()) {
+            return false;
+        }
 
-        // Users with Super Admin role cannot be edited
+        // A Super Admin can edit every user, including themselves.
+        if (Auth::user()->hasRole('Super Admin')) {
+            return true;
+        }
+
+        // Other staff cannot edit a Super Admin account.
         if ($record && $record->hasRole('Super Admin')) {
             return false;
         }
 
-        return Auth::check() && (Auth::user()->can('users.edit') ?? true);
+        return Auth::user()->can('users.edit');
+    }
+
+    public static function canView($record): bool
+    {
+        return Auth::check() && (Auth::user()->hasRole('Super Admin') || Auth::user()->can('users.index'));
     }
 
     public static function canDelete($record): bool
@@ -356,7 +367,7 @@ class UserResource extends Resource
             return false;
         }
 
-        return Auth::check() && (Auth::user()->can('users.delete') ?? true);
+        return Auth::check() && (Auth::user()->hasRole('Super Admin') || Auth::user()->can('users.delete'));
     }
 
     protected static function getPermissionGroup(string $permissionName): string

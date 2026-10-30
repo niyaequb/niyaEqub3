@@ -72,6 +72,15 @@ class User extends Authenticatable implements FilamentUser, JWTSubject
     protected static function booted(): void
     {
         static::deleting(function (User $user): void {
+            // If this login belongs to an agent, remove the agent record too
+            // (members are kept, only unlinked). Done with a query so the
+            // Agent model does not try to delete this user a second time.
+            $agent = Agent::query()->where('user_id', $user->id)->first();
+            if ($agent) {
+                $agent->cleanUpRelations();
+                \Illuminate\Support\Facades\DB::table('agents')->where('id', $agent->id)->delete();
+            }
+
             // Cleanup profile picture from storage
             if ($user->profile_picture && Storage::disk('public')->exists($user->profile_picture)) {
                 Storage::disk('public')->delete($user->profile_picture);

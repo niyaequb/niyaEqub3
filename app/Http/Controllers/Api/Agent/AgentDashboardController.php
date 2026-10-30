@@ -24,57 +24,100 @@ class AgentDashboardController extends Controller
             ], 404);
         }
 
-        $totalEarned = (float) AgentCommission::query()
-            ->where('agent_id', $agent->id)
-            ->sum('commission_amount');
+        $commissions = AgentCommission::query()->where('agent_id', $agent->id);
 
-        $commissionPending = (float) AgentCommission::query()
-            ->where('agent_id', $agent->id)
+        // Everything the agent has earned so far, whatever its approval state.
+        $totalEarned = (float) (clone $commissions)->sum('commission_amount');
+
+        // Waiting for an admin to approve.
+        $pending = (float) (clone $commissions)
             ->where('status', CommissionStatus::Pending)
             ->sum('commission_amount');
 
-        $commissionApproved = (float) AgentCommission::query()
-            ->where('agent_id', $agent->id)
+        // Approved and not yet paid: the money the agent can withdraw.
+        $approved = (float) (clone $commissions)
             ->where('status', CommissionStatus::Approved)
             ->sum('commission_amount');
 
-        $commissionUnApproved = (float) AgentCommission::query()
-            ->where('agent_id', $agent->id)
-            ->where('status', CommissionStatus::Pending)
+        // Commissions an admin paid directly with "Mark Paid".
+        $paidDirectly = (float) (clone $commissions)
+            ->where('status', CommissionStatus::Paid)
             ->sum('commission_amount');
-        // $commissionPaid = (float) AgentCommission::query()
-        //     ->where('agent_id', $agent->id)
-        //     ->where('status', CommissionStatus::Paid)
-        //     ->sum('commission_amount');
 
-        $pendingAmount = $commissionPending + $commissionApproved;
+        $requests = AgentPaymentRequest::query()->where('agent_id', $agent->id);
 
-        $paymentRequestsPendingAmount = (float) AgentPaymentRequest::query()
-            ->where('agent_id', $agent->id)
+        $paidByRequest = (float) (clone $requests)
+            ->where('status', PaymentStatus::Completed)
+            ->sum('amount');
+        $paidOut = $paidByRequest + $paidDirectly;
+
+        $requestedNotPaid = (float) (clone $requests)
             ->where('status', PaymentStatus::Pending)
             ->sum('amount');
 
-        $paymentRequestsPaidAmount = (float) AgentPaymentRequest::query()
-            ->where('agent_id', $agent->id)
-            ->where('status', PaymentStatus::Completed)
-            ->sum('amount');
+        // Withdrawable now = approved - paid through requests - still requested.
+        $balance = max(0, $approved - $paidByRequest - $requestedNotPaid);
 
-        $balance = $commissionApproved - $paymentRequestsPaidAmount;
-        // - $commissionPaid;
+        $monthStart = now()->startOfMonth();
+
+        $earnedThisMonth = (float) (clone $commissions)
+            ->where('created_at', '>=', $monthStart)
+            ->sum('commission_amount');
+
+        $membersCount = $agent->members()->count();
+        $membersThisMonth = $agent->members()
+            ->where(fn ($q) => $q->where('registered_at', '>=', $monthStart)->orWhere('created_at', '>=', $monthStart))
+            ->count();
+
+        $recentCommissions = (clone $commissions)
+            ->with('member:id,full_name')
+            ->latest('created_at')
+            ->limit(5)
+            ->get()
+            ->map(fn (AgentCommission $c) => [
+                'id' => $c->id,
+                'member_name' => $c->member?->full_name,
+                'source' => is_object($c->source) ? $c->source->value : $c->source,
+                'amount' => round((float) $c->commission_amount, 2),
+                'status' => is_object($c->status) ? $c->status->value : $c->status,
+                'created_at' => optional($c->created_at)->toIso8601String(),
+            ]);
+
+        $recentMembers = $agent->members()
+            ->with('user:id,phone')
+            ->latest()
+            ->limit(5)
+            ->get()
+            ->map(fn ($m) => [
+                'id' => $m->id,
+                'full_name' => $m->full_name,
+                'phone' => $m->user?->phone,
+                'registered_at' => optional($m->registered_at ?? $m->created_at)->toIso8601String(),
+            ]);
 
         return response()->json([
             'status' => 'success',
             'data' => [
                 'agent_id' => $agent->id,
+                'name' => $user->name,
+                'phone' => $user->phone,
+                'is_active' => (bool) $agent->is_active,
                 'referral_code' => $agent->referral_code,
-                'members_count' => $agent->members()->count(),
-                'total_earned' => round($commissionApproved, 2),
-                'pending_amount' => round($commissionUnApproved, 2),
-                // 'paid_amount' => round($commissionPaid, 2),
+                'members_count' => $membersCount,
+                'members_this_month' => $membersThisMonth,
+                'total_earned' => round($totalEarned, 2),
+                'earned_this_month' => round($earnedThisMonth, 2),
+                'pending_amount' => round($pending, 2),
+                'approved_amount' => round($approved + $paidDirectly, 2),
+                'paid_amount' => round($paidOut, 2),
                 'balance' => round($balance, 2),
-                'approved_amount' => round($commissionApproved, 2),
-                'payment_requests_pending_amount' => round($paymentRequestsPendingAmount, 2),
-                'payment_requests_paid_amount' => round($paymentRequestsPaidAmount, 2),
+                'payment_requests_pending_amount' => round($requestedNotPaid, 2),
+                'payment_requests_paid_amount' => round($paidByRequest, 2),
+                'bank_name' => $agent->bank_name,
+                'account_number' => $agent->account_number,
+                'account_holder_name' => $agent->account_holder_name,
+                'recent_commissions' => $recentCommissions,
+                'recent_members' => $recentMembers,
             ],
         ]);
     }

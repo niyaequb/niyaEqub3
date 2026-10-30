@@ -39,6 +39,18 @@ class Settings extends Page implements HasForms
 
     protected static ?int $navigationSort = 100;
 
+    /**
+     * Banks whose payment settings are frozen on this screen.
+     *
+     * Dashen is live: every value in its section is signing material, and a
+     * single changed character makes every member's payment fail at once.
+     * Listed here, its fields render read-only AND save() refuses to write
+     * them, so neither a slip of the mouse nor a crafted request can change a
+     * live bank. To change a value deliberately, remove the slug here, deploy,
+     * edit, then put it back.
+     */
+    protected const LOCKED_GATEWAYS = ['dashen'];
+
     public static function getNavigationLabel(): string
     {
         return __('filament.settings.title');
@@ -343,6 +355,7 @@ class Settings extends Page implements HasForms
 
             foreach ($gateways as $slug => $gateway) {
                 $f = fn (string $key): string => 'gw_'.$slug.'_'.$key;
+                $locked = in_array($slug, static::LOCKED_GATEWAYS, true);
 
                 // Hosted-checkout banks (EthSwitch NPG) have none of the fabric
                 // fields below. Show where they stand and move on.
@@ -427,7 +440,7 @@ class Settings extends Page implements HasForms
                         .'. This bank is withheld from the apps rather than offered and then failing when someone tries to pay.';
 
                 $schema[] = ComponentsSection::make($gateway->displayName())
-                    ->description($status.' Everything in this section is signing material: changing a value invalidates every order signed with the old one, so payments start failing immediately rather than gradually.')
+                    ->description(($locked ? 'LOCKED — view only. ' : '').$status.' Everything in this section is signing material: changing a value invalidates every order signed with the old one, so payments start failing immediately rather than gradually.')
                     ->schema([
                         // Read-only, and here because the bank asks for it during
                         // onboarding. Built from APP_URL so it is right for this
@@ -439,43 +452,52 @@ class Settings extends Page implements HasForms
                             ->helperText('Give this to '.$gateway->displayName().'. They POST here when a charge concludes. It must be reachable from the public internet — a localhost URL will never be called.')
                             ->columnSpanFull(),
                         TextInput::make($f('merchant_code'))
+                            ->disabled($locked)
                             ->label('Merchant Code')
                             ->helperText($env('merchant_code', 'sent as biz_content.merch_code and payee_identifier'))
                             ->maxLength(64),
                         TextInput::make($f('mini_app_code'))
+                            ->disabled($locked)
                             ->label('Mini App Code')
                             ->helperText($env('mini_app_code', 'the appid on every order, and the appcode the mini app presents when signing in'))
                             ->maxLength(64),
                         TextInput::make($f('merchant_app_id'))
+                            ->disabled($locked)
                             ->label('Merchant App ID')
                             ->helperText($env('merchant_app_id', 'from the credential sheet'))
                             ->maxLength(64),
                         TextInput::make($f('fabric_app_id'))
+                            ->disabled($locked)
                             ->label('Fabric App ID')
                             ->helperText($env('fabric_app_id', 'used when exchanging a customer identifier for a session'))
                             ->maxLength(64),
                         TextInput::make($f('short_code'))
+                            ->disabled($locked)
                             ->label('Short Code')
                             ->helperText($env('short_code', 'from the credential sheet'))
                             ->maxLength(64),
                         Select::make($f('stage'))
+                            ->disabled($locked)
                             ->label('Stage')
                             ->options(['uat' => 'UAT', 'production' => 'Production'])
                             ->default('uat')
                             ->helperText($env('stage', 'signed into every request, so it must match the stage the app runs against. A mismatch is rejected by the bank, not ignored')),
                         TextInput::make($f('app_secret'))
+                            ->disabled($locked)
                             ->label('App Secret')
                             ->password()
                             ->revealable()
-                            ->dehydrated()
+                            ->dehydrated(! $locked)
                             ->helperText($env('app_secret', 'signs confirmpayload and is presented to the bank app as xAPiKey'))
                             ->maxLength(255),
                         Textarea::make($f('public_key'))
+                            ->disabled($locked)
                             ->label('RSA Public Key — paste here')
                             ->rows(6)
                             ->helperText($env('public_key', 'RECOMMENDED on a hosted deployment. Paste the whole PEM block, BEGIN and END lines included — line breaks and stray spaces are normalised on save. Stored in the settings table, so it survives a redeploy.'))
                             ->columnSpanFull(),
                         TextInput::make($f('public_key_path'))
+                            ->disabled($locked)
                             ->label('RSA Public Key — file path (alternative)')
                             ->placeholder('storage/app/payments/'.$slug.'-public.pem')
                             ->helperText($env('public_key_path', 'Used only when the box above is empty. Good on a machine with a persistent disk; on a container host it will not resolve, because storage/app/payments is gitignored — correctly, signing material does not belong in a repository — and so the file is in no build image. Relative paths are from the project root.'))
@@ -499,6 +521,7 @@ class Settings extends Page implements HasForms
                     )
                     ->schema([
                         TextInput::make($f('base_url'))
+                            ->disabled($locked)
                             ->label('API Base URL')
                             ->url()
                             ->placeholder('https://...')
@@ -506,27 +529,32 @@ class Settings extends Page implements HasForms
                             ->columnSpanFull()
                             ->maxLength(255),
                         TextInput::make($f('order_query_path'))
+                            ->disabled($locked)
                             ->label('Order Query Path')
                             ->placeholder('e.g. /payment/v1/query')
                             ->helperText($env('order_query_path', 'confirms whether a transaction settled. REQUIRED before any contribution can be marked paid'))
                             ->maxLength(255),
                         TextInput::make($f('token_path'))
+                            ->disabled($locked)
                             ->label('Customer Token Path')
                             ->placeholder('e.g. /payment/v1/token')
                             ->helperText($env('token_path', 'exchanges a customer identifier for a session token. Enables sign-in through the bank app; without it members sign in with phone and OTP as usual'))
                             ->maxLength(255),
                         TextInput::make($f('sign_keys'))
+                            ->disabled($locked)
                             ->label('Signed Fields')
                             ->placeholder('timestamp,nonce_str,method,version,biz_content')
                             ->helperText($env('sign_keys', 'comma-separated, dot notation. How much fits depends on the key: a 2048-bit key allows ~214 bytes and forces a minimal subset, a 4096-bit key allows ~470 and the whole request fits. Confirm the exact list with the bank — their sample calls it keysToPick and does not say what is in it. Leave empty for the default'))
                             ->columnSpanFull()
                             ->maxLength(512),
                         Select::make($f('rsa_padding'))
+                            ->disabled($locked)
                             ->label('RSA Padding')
                             ->options(['oaep' => 'OAEP (Node default)', 'pkcs1' => 'PKCS#1 v1.5'])
                             ->default('oaep')
                             ->helperText($env('rsa_padding', 'match what the bank decrypts with')),
                         TextInput::make($f('timeout_express'))
+                            ->disabled($locked)
                             ->label('Order Timeout')
                             ->placeholder('120m')
                             ->helperText($env('timeout_express', 'how long the bank holds the order open'))
@@ -804,11 +832,15 @@ class Settings extends Page implements HasForms
                     TextInput::make('social_instagram')
                         ->label('Instagram'),
                     TextInput::make('social_youtube')
-                        ->label('YouTube'),
-                    TextInput::make('social_twitter')
-                        ->label('Twitter (X)'),
-                    TextInput::make('social_linkedin')
-                        ->label('LinkedIn'),
+                        ->label('YouTube')
+                        ->placeholder('https://www.youtube.com/@niyaequb'),
+                    TextInput::make('social_whatsapp')
+                        ->label('WhatsApp')
+                        ->placeholder('https://wa.me/2519XXXXXXXX')
+                        ->helperText('A full link, or just the phone number (e.g. 251984949956).'),
+                    TextInput::make('social_facebook')
+                        ->label('Facebook')
+                        ->placeholder('https://www.facebook.com/niyaequb'),
                 ])
                 ->columns(2);
         }
@@ -892,6 +924,12 @@ class Settings extends Page implements HasForms
             foreach ($manager->all() as $slug => $gateway) {
                 // Not edited on this screen; see the section built above.
                 if (! $gateway instanceof \App\Services\Payments\FabricGateway) {
+                    continue;
+                }
+
+                // A live bank is never written from this screen, whatever the
+                // request carries. See LOCKED_GATEWAYS.
+                if (in_array($slug, static::LOCKED_GATEWAYS, true)) {
                     continue;
                 }
 

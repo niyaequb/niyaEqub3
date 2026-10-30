@@ -27,6 +27,11 @@ class AppServiceProvider extends ServiceProvider
             URL::forceScheme('https');
         }
 
+        // Super Admin has full control: every permission check passes.
+        \Illuminate\Support\Facades\Gate::before(function ($user, $ability) {
+            return method_exists($user, 'hasRole') && $user->hasRole('Super Admin') ? true : null;
+        });
+
         \App\Models\EqubPayment::observe(\App\Observers\EqubPaymentObserver::class);
         \App\Models\EqubDraw::observe(\App\Observers\EqubDrawObserver::class);
         // The permanent "who joined which Equb, and when" record.

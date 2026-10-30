@@ -35,6 +35,10 @@ class CommissionRuleForm
                 TextInput::make('commission_value')
                     ->label('Commission Value')
                     ->numeric()
+                    ->step('0.01')
+                    ->minValue(0)
+                    ->inputMode('decimal')
+                    ->helperText('Decimals allowed, e.g. 0.50 ETB or 2.5 %.')
                     ->required(),
                 Select::make('agent_id')
                     ->label('Agent Override')

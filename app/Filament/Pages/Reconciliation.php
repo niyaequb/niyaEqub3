@@ -108,18 +108,17 @@ class Reconciliation extends Page
         return __('filament.nav.equb');
     }
 
+    // Removed from the admin on the owner's request (Oct 2026). The class is
+    // kept so nothing that references its route breaks; it is hidden from the
+    // menu and cannot be opened by anyone. Delete this file to remove it for good.
     public static function shouldRegisterNavigation(): bool
     {
-        return static::canAccess();
+        return false;
     }
 
     public static function canAccess(): bool
     {
-        return Auth::check() && (
-            Auth::user()->hasRole('Super Admin')
-            || Auth::user()->can('admin.pages.reconciliation')
-            || Auth::user()->can('equb-payments.index')
-        );
+        return false;
     }
 
     protected function canSignOff(): bool

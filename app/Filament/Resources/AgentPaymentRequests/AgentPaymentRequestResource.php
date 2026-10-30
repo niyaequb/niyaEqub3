@@ -60,7 +60,7 @@ class AgentPaymentRequestResource extends Resource
 
     public static function getEloquentQuery(): Builder
     {
-        return parent::getEloquentQuery()->with('agent.user');
+        return parent::getEloquentQuery()->with(['agent.user', 'processedBy']);
     }
 
     public static function getRelations(): array
