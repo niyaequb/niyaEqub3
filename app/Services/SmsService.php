@@ -140,7 +140,11 @@ class SmsService
         ];
 
         $this->logSms($to, 'OTP Request', 'success', $result, null, 'afro');
-        return $result;
+        return [
+            'status' => $result['status'],
+            'message' => $result['message'],
+            'verificationId' => $result['verificationId'],
+        ];
     }
 
     /**
@@ -308,7 +312,11 @@ class SmsService
                     'data' => $response,
                 ];
                 $this->logSms($to, 'OTP Request (Geez)', 'success', $result, null, 'geez');
-                return $result;
+                return [
+                    'status' => $result['status'],
+                    'message' => $result['message'],
+                    'verificationId' => $result['verificationId'],
+                ];
             }
 
             $result = [
