@@ -218,6 +218,16 @@ class CallCenterResource extends Resource
                             ->color($called ? 'success' : 'gray')
                             ->send();
                     }),
+                // Opens a direct Telegram chat with the member's phone number.
+                Action::make('telegram')
+                    ->label('Telegram')
+                    ->icon('heroicon-o-paper-airplane')
+                    ->color('info')
+                    ->button()
+                    ->tooltip(fn (EqubMembership $record): string => 'Message '.($service->phone($record) ?? '').' on Telegram')
+                    ->url(fn (EqubMembership $record): ?string => $service->telegramUrl($record), shouldOpenInNewTab: true)
+                    ->visible(fn (EqubMembership $record): bool => CallCenterService::canUse('call-center.index')
+                        && filled($service->telegramUrl($record))),
                 Action::make('log_call')
                     ->label('Feedback')
                     ->icon('heroicon-o-chat-bubble-left-ellipsis')

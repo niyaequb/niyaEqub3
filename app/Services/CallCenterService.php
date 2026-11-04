@@ -108,6 +108,28 @@ class CallCenterService
             ?: $membership->payerUser()?->phone;
     }
 
+    /**
+     * Telegram chat link for the member's phone (https://t.me/+2519XXXXXXXX).
+     * Opens a direct chat with whoever owns that number on Telegram.
+     */
+    public function telegramUrl(EqubMembership $membership): ?string
+    {
+        $digits = preg_replace('/\D+/', '', (string) $this->phone($membership));
+
+        if ($digits === '') {
+            return null;
+        }
+
+        // Ethiopian numbers: 09XXXXXXXX / 07XXXXXXXX -> 2519XXXXXXXX / 2517XXXXXXXX
+        if (str_starts_with($digits, '0')) {
+            $digits = '251'.substr($digits, 1);
+        } elseif (strlen($digits) === 9 && in_array($digits[0], ['9', '7'], true)) {
+            $digits = '251'.$digits;
+        }
+
+        return strlen($digits) >= 10 ? 'https://t.me/+'.$digits : null;
+    }
+
     public function logCall(EqubMembership $membership, array $data): CallCenterLog
     {
         return CallCenterLog::create([
