@@ -23,6 +23,9 @@ enum EqubPaymentMethod: string
     // EthSwitch National Payment Gateway: card payments on a hosted checkout.
     case Npg = 'npg';
 
+    // Hijra Bank: USSD push to the member's phone.
+    case Hijra = 'hijra';
+
     // ----- Retired -----------------------------------------------------
 
     /**

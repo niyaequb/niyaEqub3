@@ -1,6 +1,7 @@
 <?php
 
 use App\Services\Payments\Gateways\DashenGateway;
+use App\Services\Payments\Gateways\HijraGateway;
 use App\Services\Payments\Gateways\NpgGateway;
 
 return [
@@ -105,6 +106,29 @@ return [
             'channels' => ['mobile'],
             'listed_setting' => 'NPG_SHOW_IN_APPS',
             'signature_headers' => ['x-npg-signature'],
+        ],
+
+        /*
+        | Hijra Bank: USSD push.
+        |
+        | Niya asks Hijra to push a USSD prompt to the payer's phone; the
+        | member approves with their PIN; Hijra calls /payment/hijra/callback
+        | and we confirm with GET /payments/{ref} before crediting. Settings:
+        | HIJRA_TOKEN_URL, HIJRA_BASE_URL, HIJRA_CLIENT_ID, HIJRA_CLIENT_SECRET.
+        |
+        | Off in the apps until HIJRA_SHOW_IN_APPS is set to anything but
+        | false: the apps need a "check your phone" screen first.
+        */
+        'hijra' => [
+            'class' => HijraGateway::class,
+            'name' => 'Hijra Bank',
+            'env_prefix' => 'HIJRA',
+            'client' => [
+                'kind' => 'ussd_push',
+            ],
+            'channels' => ['mobile'],
+            'listed_setting' => 'HIJRA_SHOW_IN_APPS',
+            'signature_headers' => ['x-hijra-signature'],
         ],
 
         /*
