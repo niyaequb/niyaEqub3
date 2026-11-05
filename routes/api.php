@@ -104,6 +104,19 @@ Route::get('azan-voices', [\App\Http\Controllers\Api\AzanVoiceController::class,
 | them outside the /api prefix.
 |
 */
+/*
+| CBE Mobile Banking → Niya ("Unified Outgoing"). Called by CBE's hosts through
+| the IPSec tunnel; each action checks the caller's address and, after
+| /token, its bearer token. Query is registered in both spellings because
+| CBE's specification writes it with a capital Q.
+*/
+Route::prefix('cbe')->middleware('throttle:600,1')->group(function () {
+    Route::post('token', [\App\Http\Controllers\Api\CbeController::class, 'token']);
+    Route::post('Query', [\App\Http\Controllers\Api\CbeController::class, 'query']);
+    Route::post('query', [\App\Http\Controllers\Api\CbeController::class, 'query']);
+    Route::post('payment', [\App\Http\Controllers\Api\CbeController::class, 'payment']);
+});
+
 Route::prefix('payments')->group(function () {
     Route::get('providers', [\App\Http\Controllers\Api\PaymentProviderController::class, 'index']);
     Route::post('{provider}/identify', [\App\Http\Controllers\Api\MiniAppController::class, 'identify'])

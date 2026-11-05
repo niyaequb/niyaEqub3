@@ -26,6 +26,9 @@ enum EqubPaymentMethod: string
     // Hijra Bank: USSD push to the member's phone.
     case Hijra = 'hijra';
 
+    // Commercial Bank of Ethiopia: CBE Mobile Banking pays a 10-digit Niya reference.
+    case Cbe = 'cbe';
+
     // ----- Retired -----------------------------------------------------
 
     /**

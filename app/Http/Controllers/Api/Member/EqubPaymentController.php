@@ -776,7 +776,10 @@ class EqubPaymentController extends Controller
             return $this->roundBlocked($round, true);
         }
 
-        $batchReference = 'EQUB-B'.strtoupper(Str::random(10));
+        // CBE batches are typed into CBE Mobile Banking: 10 digits, like a single CBE reference.
+        $batchReference = $paymentMethod === \App\Enums\EqubPaymentMethod::Cbe
+            ? \App\Support\Payments\NumericReference::generate()
+            : 'EQUB-B'.strtoupper(Str::random(10));
 
         try {
             $payments = DB::transaction(function () use ($memberships, $data, $paymentMethod, $batchReference) {

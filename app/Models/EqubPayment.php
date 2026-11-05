@@ -89,7 +89,11 @@ class EqubPayment extends Model
             // Asked of the method rather than of a named bank, so a new bank
             // gets a reference without this line being edited.
             if ($payment->payment_method?->isGateway() && empty($payment->reference)) {
-                $payment->reference = 'EQUB-'.strtoupper(Str::random(12));
+                // CBE customers type the reference into CBE Mobile Banking,
+                // and CBE's core accepts at most 13 digits: a 10-digit number.
+                $payment->reference = $payment->payment_method === \App\Enums\EqubPaymentMethod::Cbe
+                    ? \App\Support\Payments\NumericReference::generate()
+                    : 'EQUB-'.strtoupper(Str::random(12));
             }
         });
 

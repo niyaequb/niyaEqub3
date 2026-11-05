@@ -1,5 +1,6 @@
 <?php
 
+use App\Services\Payments\Gateways\CbeGateway;
 use App\Services\Payments\Gateways\DashenGateway;
 use App\Services\Payments\Gateways\HijraGateway;
 use App\Services\Payments\Gateways\NpgGateway;
@@ -129,6 +130,31 @@ return [
             'channels' => ['mobile'],
             'listed_setting' => 'HIJRA_SHOW_IN_APPS',
             'signature_headers' => ['x-hijra-signature'],
+        ],
+
+        /*
+        | Commercial Bank of Ethiopia: CBE Mobile Banking ("Unified Outgoing").
+        |
+        | Reversed direction: CBE calls US at /api/cbe/token, /api/cbe/Query and
+        | /api/cbe/payment, through the IPSec tunnel, when a customer pays a
+        | 10-digit Niya reference in CBE Mobile Banking. See CbeController.
+        | Settings (settings table, set with `php artisan cbe:setup`):
+        | CBE_CLIENT_ID, CBE_CLIENT_SECRET, CBE_CREDIT_ACCOUNT, CBE_TIN,
+        | CBE_ALLOWED_IPS.
+        |
+        | Hidden from the apps until CBE_SHOW_IN_APPS=true: the apps need a
+        | screen that shows the member their reference first.
+        */
+        'cbe' => [
+            'class' => CbeGateway::class,
+            'name' => 'CBE Mobile Banking',
+            'env_prefix' => 'CBE',
+            'client' => [
+                'kind' => 'bill_reference',
+            ],
+            'channels' => ['mobile'],
+            'listed_setting' => 'CBE_SHOW_IN_APPS',
+            'signature_headers' => [],
         ],
 
         /*
