@@ -335,11 +335,14 @@ class CbeController extends Controller
             $result = $this->settlement->reconcile($gateway, $billId, 10);
 
             if (! ($result['success'] ?? false)) {
-                Log::critical('CBE confirmed a payment but crediting did not complete; the sweep will retry', [
+                // CBE's confirmation is already recorded above, so the
+                // contributions WILL be credited by the sweep. Per the signed
+                // spec, 99 means "not completed" and CBE may reverse the debit:
+                // answering 99 here would refund a member who is then credited.
+                // The payment is accepted, so the answer is success.
+                Log::critical('CBE payment recorded; crediting deferred to the sweep', [
                     'bill' => $billId, 'cbe_txn_ref' => $cbeRef, 'result' => $result,
                 ]);
-
-                return $fail('99', 'System error', $dref);
             }
 
             Log::info('CBE payment credited', ['bill' => $billId, 'cbe_txn_ref' => $cbeRef, 'niya_ref' => $dref]);
