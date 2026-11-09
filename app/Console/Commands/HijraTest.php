@@ -76,8 +76,15 @@ class HijraTest extends Command
 
         // Straight to the API: createOrder() looks the phone up from a
         // contribution, and a test has none.
-        $base = rtrim((string) app(\App\Services\EnvService::class)->get('HIJRA_BASE_URL'), '/');
-        $response = Http::acceptJson()->withToken($token)->timeout(30)
+        $env = app(\App\Services\EnvService::class);
+        $base = rtrim((string) $env->get('HIJRA_BASE_URL'), '/');
+        $request = Http::acceptJson()->withToken($token)->timeout(30);
+        // Same rule as the gateway: only for a UAT host whose certificate
+        // this server cannot validate (Hijra UAT is served on a bare IP).
+        if (filter_var($env->get('HIJRA_INSECURE_SKIP_TLS_VERIFY', 'false'), FILTER_VALIDATE_BOOL)) {
+            $request = $request->withoutVerifying();
+        }
+        $response = $request
             ->post($base.'/payments', [
                 'paymentReference' => $ref,
                 'customerPhone' => $phone,
