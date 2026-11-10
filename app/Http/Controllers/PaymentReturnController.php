@@ -55,7 +55,14 @@ class PaymentReturnController extends Controller
         Log::info('Payment gateway callback received', [
             'provider' => $provider,
             'reference' => $reference,
-            'params' => $request->except(['password', 'userName']),
+            'params' => $this->params($request),
+            'method' => $request->method(),
+            'content_type' => $request->header('Content-Type'),
+            // Only when nothing parsed, so a field filtered out above never
+            // reaches the log through the raw body.
+            'raw' => $request->except(['password', 'userName']) === []
+                ? mb_substr((string) $request->getContent(), 0, 500)
+                : null,
         ]);
 
         if (! $gateway || ! $reference) {
@@ -82,7 +89,29 @@ class PaymentReturnController extends Controller
             return [null, null];
         }
 
-        return [$gateway, $gateway->referenceFromReturn($request->all())];
+        return [$gateway, $gateway->referenceFromReturn($this->params($request))];
+    }
+
+    /**
+     * The request's parameters, including a JSON body sent without a JSON
+     * Content-Type (Hijra's webhook arrived as an empty parameter list).
+     * Only used to find which of our references is meant; nothing is trusted.
+     *
+     * @return array<string, mixed>
+     */
+    protected function params(Request $request): array
+    {
+        $params = $request->except(['password', 'userName']);
+
+        if ($params === []) {
+            $decoded = json_decode((string) $request->getContent(), true);
+
+            if (is_array($decoded)) {
+                $params = $decoded;
+            }
+        }
+
+        return $params;
     }
 
     /**
