@@ -93,6 +93,21 @@ class HijraTest extends Command
                 'additionalParams' => ['notes' => 'Niya integration test'],
             ]);
 
+        // Record the test order like a real one, so Hijra's webhook for it
+        // is recognised (200) instead of answered "Unknown order" (404).
+        if (in_array($response->status(), [200, 202], true)) {
+            \App\Models\PaymentGatewayOrder::updateOrCreate(
+                ['gateway' => 'hijra', 'reference' => $ref],
+                [
+                    'external_order_id' => (string) ($response->json('correlationId') ?? ''),
+                    'amount_minor' => (int) round($amount * 100),
+                    'currency' => 'ETB',
+                    'status' => strtolower((string) ($response->json('status') ?? 'received')),
+                    'register_response' => $response->json(),
+                ]
+            );
+        }
+
         $this->info('2. Initiate: HTTP '.$response->status());
         $this->line($response->body());
         $this->line("\nApprove the prompt on the phone, then run:\n  php artisan hijra:test --status={$ref}");
