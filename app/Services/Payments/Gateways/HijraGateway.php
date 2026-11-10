@@ -515,6 +515,26 @@ class HijraGateway implements HandlesCustomerReturn, PaymentGateway
             ];
         }
 
+        // Hijra's UAT leaves a rejected request in RECEIVED with a
+        // failureReason (seen: CUSTOMER_NOT_FOUND) instead of moving it to
+        // FAILED. No prompt is ever sent for it, so it is final: say so now
+        // rather than leave the member waiting for a USSD prompt.
+        $failureReason = trim((string) ($body['failureReason'] ?? ''));
+        if ($failureReason !== '' && ! in_array($status, self::SETTLED, true)) {
+            Log::warning('Hijra rejected the payment', ['reference' => $reference, 'status' => $status, 'reason' => $failureReason]);
+
+            return [
+                'success' => false,
+                'status' => 'FAILED',
+                'message' => match ($failureReason) {
+                    'CUSTOMER_NOT_FOUND' => 'This phone number has no Hijra Bank account.',
+                    'INSUFFICIENT_FUNDS', 'INSUFFICIENT_BALANCE' => 'Not enough balance in the Hijra Bank account.',
+                    default => 'Hijra Bank could not complete the payment ('.$failureReason.').',
+                },
+                'data' => $data,
+            ];
+        }
+
         // RECEIVED / USSD_INITIATED / PROCESSING, or a status Hijra add later.
         // Money may be moving: never fail it from here. Hijra time the prompt
         // out themselves (TIMED_OUT), which is the answer we wait for.
