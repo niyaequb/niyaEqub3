@@ -134,7 +134,7 @@ class CbeController extends Controller
             'Timestamp' => now()->toIso8601String(),
         ];
         $fail = fn (string $code, string $desc) => response()->json($out + [
-            'Status' => 'FAILED', 'Response_Code' => $code, 'Response_Description' => $desc, 'Additional_Fields' => [],
+            'Status' => 'Failure', 'Response_Code' => $code, 'Response_Description' => $desc, 'Additional_Fields' => [],
         ]);
 
         try {
@@ -200,7 +200,7 @@ class CbeController extends Controller
                 'Tin_Number' => $gateway->tin(),
                 'Payment_Reason' => 'Niya Equb contribution'.($group ? ' - '.$group : ''),
                 'Transaction_Type' => 'EQUB_CONTRIBUTION',
-                'Status' => 'SUCCESS',
+                'Status' => 'Success',
                 'Response_Code' => '0',
                 'Response_Description' => 'Success',
                 'Additional_Fields' => [['Key' => 'Contribution_Count', 'Value' => (string) $payments->count()]],
@@ -232,7 +232,7 @@ class CbeController extends Controller
             'Destination_txn_Ref' => $dref, 'Status' => $status, 'Response_Code' => $code,
             'Response_Description' => $desc, 'Additional_Fields' => [],
         ]);
-        $fail = fn (string $code, string $desc, string $dref = '') => $respond('FAILED', $code, $desc, $dref);
+        $fail = fn (string $code, string $desc, string $dref = '') => $respond('Failure', $code, $desc, $dref);
 
         try {
             if ($req === null) {
@@ -347,7 +347,7 @@ class CbeController extends Controller
 
             Log::info('CBE payment credited', ['bill' => $billId, 'cbe_txn_ref' => $cbeRef, 'niya_ref' => $dref]);
 
-            return $respond('SUCCESS', '0', 'Success', $dref);
+            return $respond('Success', '0', 'Success', $dref);
         } catch (\Throwable $e) {
             Log::error('CBE Payment failed', ['error' => $e->getMessage(), 'bill' => $req['Bill_Id'] ?? null]);
 
