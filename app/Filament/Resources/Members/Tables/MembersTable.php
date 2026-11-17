@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Members\Tables;
 
+use App\Filament\Resources\Members\Actions\MemberExportAction;
 use App\Models\Member;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
@@ -10,9 +11,13 @@ use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
+use Filament\Forms\Components\TextInput;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Filters\Filter;
+use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Auth;
 
 class MembersTable
@@ -41,6 +46,18 @@ class MembersTable
                     ->boolean()
                     ->getStateUsing(fn (Member $record): bool => (bool) $record->user?->phone_verified_at)
                     ->sortable(),
+                TextColumn::make('address')
+                    ->label('Address')
+                    ->searchable()
+                    ->limit(40)
+                    ->tooltip(fn (Member $record): ?string => $record->address)
+                    ->placeholder('—')
+                    ->toggleable(),
+                TextColumn::make('city')
+                    ->label('City')
+                    ->searchable()
+                    ->placeholder('—')
+                    ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('agent.name')
                     ->label('Agent')
                     ->getStateUsing(fn (Member $record): ?string => $record->agent?->user?->name)
@@ -61,7 +78,33 @@ class MembersTable
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([
-                //
+                Filter::make('address')
+                    ->schema([
+                        TextInput::make('address')
+                            ->label('Address')
+                            ->placeholder('e.g. Bole, Kirkos, 22 Mazoria')
+                            ->prefixIcon('heroicon-m-map-pin'),
+                    ])
+                    ->query(fn (Builder $query, array $data): Builder => $query->when(
+                        filled($data['address'] ?? null),
+                        fn (Builder $query) => $query->where('address', 'like', '%'.trim($data['address']).'%'),
+                    ))
+                    ->indicateUsing(fn (array $data): array => filled($data['address'] ?? null)
+                        ? ['Address: '.$data['address']]
+                        : []),
+                SelectFilter::make('city')
+                    ->label('City')
+                    ->options(fn (): array => Member::query()
+                        ->whereNotNull('city')
+                        ->where('city', '!=', '')
+                        ->distinct()
+                        ->orderBy('city')
+                        ->pluck('city', 'city')
+                        ->all())
+                    ->searchable(),
+            ])
+            ->headerActions([
+                MemberExportAction::make(),
             ])
             ->recordActions([
                 ActionGroup::make([
@@ -136,6 +179,7 @@ class MembersTable
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
+                    MemberExportAction::makeBulk(),
                     DeleteBulkAction::make()
                         ->visible(function (): bool {
                             return Auth::check() &&
@@ -143,8 +187,6 @@ class MembersTable
                         }),
                 ]),
             ]);
-
-        \App\Filament\Support\TableExportHelper::attach($table, 'Members');
 
         return $table;
     }
