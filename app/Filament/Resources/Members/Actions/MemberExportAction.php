@@ -348,13 +348,24 @@ class MemberExportAction
             'filters' => $payload['filters'],
             'generatedAt' => now()->format('M j, Y \a\t H:i'),
             'generatedBy' => Auth::user()?->name,
-            'fontBase64' => $needsEthiopic ? static::ethiopicFont() : null,
+            'ethiopicFont' => $needsEthiopic ? static::ethiopicFontPaths() : null,
         ])->render();
+
+        // Dompdf caches font metrics in its font dir. The default lives in vendor/,
+        // which usually isn't writable on the server — and then custom fonts are
+        // silently ignored. Use a writable storage folder instead.
+        $fontCache = storage_path('fonts');
+        if (! is_dir($fontCache)) {
+            @mkdir($fontCache, 0775, true);
+        }
 
         $options = new Options;
         $options->set('isHtml5ParserEnabled', true);
         $options->set('isRemoteEnabled', false);
         $options->set('defaultFont', 'DejaVu Sans');
+        $options->set('fontDir', $fontCache);
+        $options->set('fontCache', $fontCache);
+        $options->set('chroot', [base_path()]);
 
         $dompdf = new Dompdf($options);
         $dompdf->loadHtml($html, 'UTF-8');
@@ -408,10 +419,37 @@ class MemberExportAction
         return trim((string) $value);
     }
 
-    protected static function ethiopicFont(): ?string
+    /** Bundled Noto Sans Ethiopic font files (resources/fonts), or null if missing. */
+    protected static function ethiopicFontPaths(): ?array
     {
-        $path = storage_path('app/public/fonts/NotoSansEthiopic-Regular.ttf');
+        $regular = resource_path('fonts/NotoSansEthiopic-Regular.ttf');
+        $bold = resource_path('fonts/NotoSansEthiopic-Bold.ttf');
 
-        return is_file($path) ? base64_encode(file_get_contents($path)) : null;
+        if (! is_file($regular)) {
+            return null;
+        }
+
+        return [
+            'regular' => $regular,
+            'bold' => is_file($bold) ? $bold : $regular,
+        ];
+    }
+
+    /**
+     * Escapes a value for the PDF and wraps Amharic runs in <span class="et">.
+     *
+     * Noto Sans Ethiopic has no Latin letters or digits, and Dompdf does not
+     * reliably fall back per character, so only the Ethiopic text gets that
+     * font; everything else stays in DejaVu Sans.
+     */
+    public static function pdfText(?string $value): string
+    {
+        $escaped = e((string) $value);
+
+        return preg_replace(
+            '/\p{Ethiopic}+(?:[ \x{00A0}]+\p{Ethiopic}+)*/u',
+            '<span class="et">$0</span>',
+            $escaped,
+        ) ?? $escaped;
     }
 }
