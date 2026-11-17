@@ -104,4 +104,11 @@ Route::middleware(['web', 'auth'])->prefix('admin')->group(function () {
     // Serves a rendered print job to the print agent's iframe.
     Route::get('/print-jobs/{job}/content', [ReportPrintController::class, 'jobContent'])
         ->name('admin.print-jobs.content');
+
+    // Members PDF export, queued from the Members table Export modal.
+    // Signed + short-lived; the export details sit in the admin's own session.
+    Route::get('/members/export/pdf/{token}', [\App\Http\Controllers\MemberExportController::class, 'pdf'])
+        ->middleware('signed:relative')
+        ->where('token', '[A-Za-z0-9]{40}')
+        ->name('admin.members.export-pdf');
 });

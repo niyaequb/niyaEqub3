@@ -17,6 +17,9 @@ use Filament\Schemas\Components\Utilities\Get;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\URL;
+use Illuminate\Support\Str;
+use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
@@ -27,7 +30,9 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 class MemberExportAction
 {
     /** Hard cap for PDF rendering (Dompdf gets slow beyond this). CSV has no cap. */
-    protected const PDF_MAX_ROWS = 2000;
+    public const PDF_MAX_ROWS = 2000;
+
+    protected const PDF_SESSION_PREFIX = 'exports.members.pdf.';
 
     protected const SESSION_KEY = 'exports.members';
 
@@ -84,7 +89,7 @@ class MemberExportAction
             ->action(function (array $data, $livewire) {
                 $query = $livewire->getFilteredSortedTableQuery();
 
-                return static::export($query, $data, static::describeFilters($livewire));
+                return static::export($query, $data, static::describeFilters($livewire), $livewire);
             });
     }
 
@@ -105,10 +110,10 @@ class MemberExportAction
             ->schema(static::formSchema())
             ->fillForm(static::rememberedState())
             ->deselectRecordsAfterCompletion()
-            ->action(function (array $data, Collection $records) {
+            ->action(function (array $data, Collection $records, $livewire) {
                 $query = Member::query()->whereKey($records->modelKeys())->orderBy('id');
 
-                return static::export($query, $data, ['Selection' => number_format($records->count()).' selected row(s)']);
+                return static::export($query, $data, ['Selection' => number_format($records->count()).' selected row(s)'], $livewire);
             });
     }
 
@@ -184,7 +189,7 @@ class MemberExportAction
         ];
     }
 
-    protected static function export(Builder $query, array $data, array $filters): ?StreamedResponse
+    protected static function export(Builder $query, array $data, array $filters, $livewire): ?StreamedResponse
     {
         $fields = static::fields();
 
@@ -225,9 +230,13 @@ class MemberExportAction
 
         $filename = 'members_'.now()->format('Y-m-d_His');
 
-        return ($data['format'] ?? 'csv') === 'pdf'
-            ? static::exportPdf($query, $columns, $total, $filters, $data['orientation'] ?? 'auto', $filename.'.pdf')
-            : static::exportCsv($query, $columns, $filename.'.csv');
+        if (($data['format'] ?? 'csv') === 'pdf') {
+            static::queuePdfDownload($query, $selected, $total, $filters, $data['orientation'] ?? 'auto', $livewire);
+
+            return null;
+        }
+
+        return static::exportCsv($query, $columns, $filename.'.csv');
     }
 
     protected static function exportCsv(Builder $query, array $columns, string $filename): StreamedResponse
@@ -248,9 +257,31 @@ class MemberExportAction
         }, $filename, ['Content-Type' => 'text/csv; charset=UTF-8']);
     }
 
-    protected static function exportPdf(Builder $query, array $columns, int $total, array $filters, string $orientation, string $filename): StreamedResponse
+    /**
+     * PDFs are rendered on a dedicated HTTP route rather than inside the Livewire
+     * request: Dompdf needs more time/memory than a Livewire call allows, and
+     * Livewire would otherwise base64-embed the whole file in its JSON response.
+     * The request details are parked in the admin's own session under a random
+     * token, and the browser is sent to a short-lived signed URL.
+     */
+    protected static function queuePdfDownload(Builder $query, array $selected, int $total, array $filters, string $orientation, $livewire): void
     {
-        $members = (clone $query)->limit(static::PDF_MAX_ROWS)->get();
+        $keyName = $query->getModel()->getQualifiedKeyName();
+
+        $ids = (clone $query)->limit(static::PDF_MAX_ROWS)->pluck($keyName)->all();
+
+        $token = Str::random(40);
+
+        session()->put(static::PDF_SESSION_PREFIX.$token, [
+            'ids' => $ids,
+            'columns' => $selected,
+            'total' => $total,
+            'filters' => $filters,
+            'orientation' => $orientation,
+        ]);
+
+        // Relative signature: immune to http/https or host differences behind a proxy.
+        $url = URL::temporarySignedRoute('admin.members.export-pdf', now()->addMinutes(10), ['token' => $token], absolute: false);
 
         if ($total > static::PDF_MAX_ROWS) {
             Notification::make()
@@ -259,22 +290,65 @@ class MemberExportAction
                 ->warning()
                 ->persistent()
                 ->send();
+        } else {
+            Notification::make()
+                ->title('Preparing your PDF…')
+                ->body('The download will start in a few seconds.')
+                ->info()
+                ->send();
         }
 
-        if ($orientation === 'auto') {
+        $livewire->js('window.location.href = '.json_encode($url).';');
+    }
+
+    /**
+     * Called by the download route. Builds and returns the PDF for a queued export.
+     */
+    public static function pdfResponse(string $token): Response
+    {
+        $payload = session()->pull(static::PDF_SESSION_PREFIX.$token);
+
+        abort_if(! is_array($payload), 410, 'This export link has expired. Please run the export again.');
+
+        @set_time_limit(300);
+        @ini_set('memory_limit', '1024M');
+
+        $fields = static::fields();
+        $columns = array_intersect_key($fields, array_flip($payload['columns']));
+
+        $ids = $payload['ids'];
+
+        // Fetch in the exact order the admin saw in the table.
+        $members = collect($ids)->chunk(1000)->flatMap(fn ($chunk) => Member::query()
+            ->with(['user', 'agent.user'])
+            ->whereKey($chunk->all())
+            ->get())
+            ->keyBy('id');
+
+        $rows = collect($ids)
+            ->map(fn ($id) => $members->get($id))
+            ->filter()
+            ->values()
+            ->map(fn (Member $m) => array_values(array_map(fn (array $c) => static::clean(($c[1])($m)), $columns)));
+
+        $orientation = $payload['orientation'];
+        if (! in_array($orientation, ['portrait', 'landscape'], true)) {
             $orientation = count($columns) > 6 ? 'landscape' : 'portrait';
         }
 
+        // Only embed the (large) Ethiopic font when the data actually needs it.
+        $needsEthiopic = $rows->contains(fn (array $row) => preg_match('/\p{Ethiopic}/u', implode(' ', $row)) === 1);
+
         $html = view('exports.members-pdf', [
-            'brand' => filament()->getBrandName() ?: config('app.name'),
-            'columns' => array_map(fn (array $c) => $c[0], $columns),
-            'rows' => $members->map(fn (Member $m) => array_map(fn (array $c) => static::clean(($c[1])($m)), $columns)),
-            'total' => $total,
-            'shown' => $members->count(),
-            'filters' => $filters,
+            'brand' => (string) (filament()->getBrandName() ?: config('app.name')),
+            'columns' => array_values(array_map(fn (array $c) => $c[0], $columns)),
+            'rows' => $rows,
+            'total' => $payload['total'],
+            'shown' => $rows->count(),
+            'filters' => $payload['filters'],
             'generatedAt' => now()->format('M j, Y \a\t H:i'),
             'generatedBy' => Auth::user()?->name,
-            'fontBase64' => static::ethiopicFont(),
+            'fontBase64' => $needsEthiopic ? static::ethiopicFont() : null,
         ])->render();
 
         $options = new Options;
@@ -289,22 +363,21 @@ class MemberExportAction
 
         // Page numbers in the footer.
         $canvas = $dompdf->getCanvas();
-        $font = $dompdf->getFontMetrics()->getFont('DejaVu Sans');
         $canvas->page_text(
             $canvas->get_width() - 90,
             $canvas->get_height() - 24,
             'Page {PAGE_NUM} of {PAGE_COUNT}',
-            $font,
+            $dompdf->getFontMetrics()->getFont('DejaVu Sans'),
             7,
             [0.45, 0.45, 0.45],
         );
 
-        $output = $dompdf->output();
+        $filename = 'members_'.now()->format('Y-m-d_His').'.pdf';
 
-        return response()->streamDownload(function () use ($output): void {
-            echo $output;
-        }, $filename, [
+        return response($dompdf->output(), 200, [
             'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'attachment; filename="'.$filename.'"',
+            'Cache-Control' => 'no-store, private',
         ]);
     }
 

@@ -50,8 +50,6 @@
         }
 
         table.data { width: 100%; border-collapse: collapse; }
-        table.data thead { display: table-header-group; }
-        table.data tr { page-break-inside: avoid; }
         table.data th {
             background: #111827;
             color: #ffffff;
@@ -68,7 +66,7 @@
             vertical-align: top;
             word-wrap: break-word;
         }
-        table.data tbody tr:nth-child(even) td { background: #f9fafb; }
+        table.data tr.alt td { background: #f9fafb; }
         td.num { color: #6b7280; width: 22px; }
 
         .footer {
@@ -125,7 +123,7 @@
         </thead>
         <tbody>
             @foreach ($rows as $i => $row)
-                <tr>
+                <tr @if ($i % 2) class="alt" @endif>
                     <td class="num">{{ $i + 1 }}</td>
                     @foreach ($row as $value)
                         <td>{{ $value !== '' ? $value : '—' }}</td>
