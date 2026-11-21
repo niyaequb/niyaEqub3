@@ -1,5 +1,6 @@
 <?php
 
+use App\Services\Payments\Gateways\AwashGateway;
 use App\Services\Payments\Gateways\CbeGateway;
 use App\Services\Payments\Gateways\DashenGateway;
 use App\Services\Payments\Gateways\HijraGateway;
@@ -155,6 +156,32 @@ return [
             'channels' => ['mobile'],
             'listed_setting' => 'CBE_SHOW_IN_APPS',
             'signature_headers' => [],
+        ],
+
+        /*
+        | Awash Bank: Merchant Customer Debit ("Jupiter"), through the IPSec VPN.
+        |
+        | Niya sends MerchantRS/DebitRequest with the payer's phone; the member
+        | approves on their phone; Awash calls /payment/awash/callback and we
+        | confirm with MerchantRS/DebitStatus before crediting. Same flow and
+        | same app screen as Hijra (kind ussd_push). Settings: AWASH_BASE_URL,
+        | AWASH_MERCHANT_CODE, AWASH_TILL_NUMBER, AWASH_PASSWORD (and
+        | AWASH_RESOLVE_IP / AWASH_SOURCE_IP for the tunnel). See AwashGateway
+        | and Awash/AWASH_INTEGRATION.md.
+        |
+        | Hidden from the apps while AWASH_SHOW_IN_APPS=false; awash:test
+        | still works.
+        */
+        'awash' => [
+            'class' => AwashGateway::class,
+            'name' => 'Awash Bank',
+            'env_prefix' => 'AWASH',
+            'client' => [
+                'kind' => 'ussd_push',
+            ],
+            'channels' => ['mobile'],
+            'listed_setting' => 'AWASH_SHOW_IN_APPS',
+            'signature_headers' => ['x-awash-signature'],
         ],
 
         /*

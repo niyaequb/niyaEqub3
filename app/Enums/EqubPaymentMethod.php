@@ -29,6 +29,9 @@ enum EqubPaymentMethod: string
     // Commercial Bank of Ethiopia: CBE Mobile Banking pays a 10-digit Niya reference.
     case Cbe = 'cbe';
 
+    // Awash Bank: merchant debit request approved on the member's phone.
+    case Awash = 'awash';
+
     // ----- Retired -----------------------------------------------------
 
     /**
